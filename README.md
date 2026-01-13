@@ -1,8 +1,11 @@
 # Proxmox VE Support Log Collector
 
 **Version:** 3.1.0 — 10/2025
+
 **Unternehmen:** Thomas-Krenn.AG
+
 **Autor:** Samuel Mueller
+
 **Kontakt:** [smueller@thomas-krenn.com](mailto:smueller@thomas-krenn.com)
 
 ---
