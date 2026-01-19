@@ -2,8 +2,6 @@
 
 **Version:** 3.1.0 — 10/2025
 
-**Unternehmen:** Thomas-Krenn.AG
-
 **Autor:** Samuel Müller
 
 **Kontakt:** [smueller@thomas-krenn.com](mailto:smueller@thomas-krenn.com)
