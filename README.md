@@ -4,7 +4,7 @@
 
 **Unternehmen:** Thomas-Krenn.AG
 
-**Autor:** Samuel Mueller
+**Autor:** Samuel Müller
 
 **Kontakt:** [smueller@thomas-krenn.com](mailto:smueller@thomas-krenn.com)
 
