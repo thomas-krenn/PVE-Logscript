@@ -16,6 +16,61 @@ Die Ausführung erfolgt **read-only**, mit Ausnahme der **optionalen Installatio
 
 ---
 
+## Installation & Verwendung
+
+### 1. Repository klonen
+
+```bash
+git clone https://github.com/thomas-krenn/PVE-Logscript.git
+```
+
+### 2. In das Verzeichnis wechseln
+
+```bash
+cd PVE-Logscript
+```
+
+### 3. Skript ausführbar machen
+
+```bash
+chmod +x getpvelogs.sh
+```
+
+### 4. Skript ausführen (als root)
+
+```bash
+sudo ./getpvelogs.sh
+```
+
+### Alternativ: Einzeiler
+
+Falls das Skript nur einmalig benötigt wird:
+
+```bash
+curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpvelogs.sh | sudo bash
+```
+
+### Beispiele
+
+```bash
+# Standard-Ausführung mit interaktiver Abfrage
+sudo ./getpvelogs.sh
+
+# Automatische Installation fehlender Tools
+sudo ./getpvelogs.sh --install-tools
+
+# Ohne Tool-Installation (fehlende Bereiche werden übersprungen)
+sudo ./getpvelogs.sh --no-install
+
+# Arbeitsverzeichnis behalten (für Debugging)
+sudo ./getpvelogs.sh --keep-work
+
+# Version anzeigen
+./getpvelogs.sh --version
+```
+
+---
+
 ## Funktionsumfang
 
 * Fortschrittsausgabe auf **STDOUT** (Sammle / Kopiere / Packe)
