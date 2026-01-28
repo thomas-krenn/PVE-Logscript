@@ -205,6 +205,9 @@ Usage: getpvelogs.sh [OPTIONS]
 Proxmox VE Support Log Collector v${VERSION}
 Sammelt diagnostisch relevante Systeminformationen von Proxmox VE Hosts.
 
+Interaktiver Modus:
+  -i, --interactive   Interaktive TUI (whiptail) starten
+
 Betriebsmodi:
   --fast              Nur essentielle Logs (schnell)
   --normal            Standard-Umfang (Default)
@@ -228,6 +231,7 @@ Sonstiges:
   -h, --help          Diese Hilfe anzeigen
 
 Beispiele:
+  sudo ./getpvelogs.sh --interactive        # Interaktiver Modus mit TUI
   sudo ./getpvelogs.sh --full --install-tools
   sudo ./getpvelogs.sh --fast --output-dir /tmp
   sudo ./getpvelogs.sh --normal --exclude ceph,smart --anonymize
@@ -275,6 +279,9 @@ while [[ $# -gt 0 ]]; do
       # Selbsttest wird spaeter ausgefuehrt
       RUN_SELFTEST="yes"
       ;;
+    -i|--interactive)
+      INTERACTIVE="yes"
+      ;;
     -v|--version)
       echo "getpvelogs.sh v${VERSION}"
       exit 0
@@ -291,6 +298,348 @@ done
 
 # Variable fuer Selbsttest initialisieren falls nicht gesetzt
 RUN_SELFTEST="${RUN_SELFTEST:-no}"
+INTERACTIVE="${INTERACTIVE:-no}"
+
+# ---------- Interaktive TUI (whiptail) ----------
+
+# Prueft ob whiptail verfuegbar ist
+check_whiptail() {
+  if ! have whiptail; then
+    echo "FEHLER: whiptail ist nicht installiert."
+    echo "Installieren Sie es mit: apt-get install whiptail"
+    echo ""
+    echo "Alternativ koennen Sie das Skript mit Parametern ausfuehren:"
+    echo "  $0 --help"
+    exit 1
+  fi
+}
+
+# Zeigt den Willkommens-Dialog
+show_welcome() {
+  whiptail --title "PVE Support Log Collector v${VERSION}" \
+    --msgbox "Willkommen zum Proxmox VE Support Log Collector!\n\n\
+Dieses Tool sammelt diagnostisch relevante Systeminformationen\n\
+von Proxmox VE Hosts fuer den Support.\n\n\
+Die Ausfuehrung ist read-only (bis auf optionale Tool-Installation).\n\n\
+Druecken Sie OK, um fortzufahren." 16 65
+}
+
+# Modus-Auswahl
+select_mode() {
+  local choice
+  choice=$(whiptail --title "Betriebsmodus waehlen" \
+    --radiolist "Waehlen Sie den Umfang der Datensammlung:\n\n\
+Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 70 3 \
+    "fast" "Schnell - Nur essentielle Logs (Journal, dmesg, Services)" OFF \
+    "normal" "Standard - Fast + Storage, SMART, Ceph, Cluster [Empfohlen]" ON \
+    "full" "Vollstaendig - Alles inkl. Hardware, VM-Configs, Performance" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  MODE="$choice"
+  return 0
+}
+
+# Tool-Installation Option
+select_tool_install() {
+  local choice
+  choice=$(whiptail --title "Tool-Installation" \
+    --radiolist "Wie sollen fehlende optionale Tools behandelt werden?\n\n\
+Optionale Tools erweitern die Datensammlung (z.B. nvme-cli, ipmitool)." 16 70 3 \
+    "ask" "Nachfragen - Bei fehlenden Tools einzeln fragen" ON \
+    "yes" "Automatisch - Fehlende Tools ohne Nachfrage installieren" OFF \
+    "no" "Nicht installieren - Fehlende Bereiche ueberspringen" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  AUTO_INSTALL_TOOLS="$choice"
+  return 0
+}
+
+# Optionale Features (Checkboxen)
+select_options() {
+  local choices
+  choices=$(whiptail --title "Zusaetzliche Optionen" \
+    --checklist "Waehlen Sie zusaetzliche Optionen:\n\n\
+Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 75 6 \
+    "anonymize" "Anonymisieren - IPs, MACs und Hostnamen ersetzen" OFF \
+    "json-meta" "JSON-Metadaten - Zusaetzliche JSON-Datei erstellen" OFF \
+    "verbose" "Verbose - Detaillierte Ausgabe waehrend Sammlung" OFF \
+    "keep-work" "Arbeitsverzeichnis behalten (nicht loeschen)" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  # Optionen parsen
+  [[ "$choices" == *"anonymize"* ]] && ANONYMIZE="yes"
+  [[ "$choices" == *"json-meta"* ]] && JSON_META="yes"
+  [[ "$choices" == *"verbose"* ]] && VERBOSE="yes"
+  [[ "$choices" == *"keep-work"* ]] && KEEP_WORK="yes"
+  
+  return 0
+}
+
+# Bereiche ausschliessen (optional)
+select_excludes() {
+  # Nur fragen wenn gewuenscht
+  if ! whiptail --title "Bereiche ausschliessen?" \
+    --yesno "Moechten Sie bestimmte Bereiche von der Datensammlung ausschliessen?\n\n\
+Dies ist nuetzlich, wenn Sie z.B. kein Ceph nutzen oder\n\
+SMART-Daten nicht benoetigen." 12 65; then
+    return 0
+  fi
+  
+  local choices
+  choices=$(whiptail --title "Bereiche ausschliessen" \
+    --checklist "Waehlen Sie Bereiche, die NICHT gesammelt werden sollen:\n\n\
+Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 70 6 \
+    "ceph" "Ceph-Cluster Informationen" OFF \
+    "smart" "SMART/NVMe Festplattendaten" OFF \
+    "storage" "Storage-Informationen (LVM, ZFS, MDADM)" OFF \
+    "network" "Erweiterte Netzwerkdaten" OFF \
+    "proxmox" "Proxmox-spezifische Daten" OFF \
+    "hardware" "Hardware-Daten (nur bei --full relevant)" OFF \
+    "firewall" "Firewall-Konfiguration (nur bei --full)" OFF \
+    "performance" "Performance-Daten (nur bei --full)" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  # Kommaseparierte Liste erstellen
+  if [[ -n "$choices" ]]; then
+    # Anfuehrungszeichen entfernen und durch Kommas trennen
+    EXCLUDE_SECTIONS=$(echo "$choices" | tr -d '"' | tr ' ' ',')
+  fi
+  
+  return 0
+}
+
+# Ausgabeverzeichnis waehlen (optional)
+select_output_dir() {
+  if ! whiptail --title "Ausgabeverzeichnis" \
+    --yesno "Moechten Sie ein eigenes Ausgabeverzeichnis festlegen?\n\n\
+Standard: Aktuelles Verzeichnis ($(pwd))" 10 65; then
+    return 0
+  fi
+  
+  local dir
+  dir=$(whiptail --title "Ausgabeverzeichnis" \
+    --inputbox "Geben Sie den Pfad zum Ausgabeverzeichnis ein:" 10 65 \
+    "$(pwd)" 3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  if [[ -n "$dir" ]]; then
+    OUTPUT_DIR="$dir"
+  fi
+  
+  return 0
+}
+
+# Zusammenfassung und Bestaetigung
+show_summary() {
+  local exclude_text="Keine"
+  [[ -n "$EXCLUDE_SECTIONS" ]] && exclude_text="$EXCLUDE_SECTIONS"
+  
+  local output_text="${OUTPUT_DIR:-$(pwd)}"
+  
+  local options_text=""
+  [[ "$ANONYMIZE" == "yes" ]] && options_text+="Anonymisierung, "
+  [[ "$JSON_META" == "yes" ]] && options_text+="JSON-Meta, "
+  [[ "$VERBOSE" == "yes" ]] && options_text+="Verbose, "
+  [[ "$KEEP_WORK" == "yes" ]] && options_text+="Arbeitsverz. behalten, "
+  [[ -z "$options_text" ]] && options_text="Keine"
+  options_text="${options_text%, }"  # Letztes Komma entfernen
+  
+  local install_text="Nachfragen"
+  [[ "$AUTO_INSTALL_TOOLS" == "yes" ]] && install_text="Automatisch"
+  [[ "$AUTO_INSTALL_TOOLS" == "no" ]] && install_text="Nicht installieren"
+  
+  whiptail --title "Zusammenfassung" \
+    --yesno "Bitte ueberpruefen Sie Ihre Auswahl:\n\n\
+╔══════════════════════════════════════════════════╗\n\
+║  Betriebsmodus:      $MODE\n\
+║  Tool-Installation:  $install_text\n\
+║  Ausgabeverzeichnis: $output_text\n\
+║  Ausgeschlossen:     $exclude_text\n\
+║  Optionen:           $options_text\n\
+╚══════════════════════════════════════════════════╝\n\n\
+Moechten Sie die Datensammlung jetzt starten?" 20 70
+  
+  return $?
+}
+
+# Fortschritts-Dialog (Gauge)
+show_progress() {
+  local percent=$1
+  local message=$2
+  echo -e "XXX\n$percent\n$message\nXXX"
+}
+
+# Schnellstart-Menue
+show_quickstart() {
+  local choice
+  choice=$(whiptail --title "PVE Support Log Collector v${VERSION}" \
+    --menu "Willkommen! Waehlen Sie eine Option:\n" 18 70 5 \
+    "quick-normal" "Schnellstart - Standardmodus (empfohlen)" \
+    "quick-full" "Schnellstart - Vollstaendiger Modus" \
+    "quick-fast" "Schnellstart - Nur essentielle Logs" \
+    "custom" "Benutzerdefiniert - Alle Optionen durchgehen" \
+    "selftest" "Systemtest - Verfuegbare Tools anzeigen" \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  case "$choice" in
+    quick-normal)
+      MODE="normal"
+      AUTO_INSTALL_TOOLS="ask"
+      return 2  # Signalisiert Schnellstart
+      ;;
+    quick-full)
+      MODE="full"
+      AUTO_INSTALL_TOOLS="ask"
+      return 2
+      ;;
+    quick-fast)
+      MODE="fast"
+      AUTO_INSTALL_TOOLS="no"
+      return 2
+      ;;
+    custom)
+      return 0  # Weiter mit benutzerdefinierten Optionen
+      ;;
+    selftest)
+      clear
+      run_selftest
+      echo ""
+      read -rp "Druecken Sie ENTER um fortzufahren..." || true
+      # Rekursiv neu starten
+      show_quickstart
+      return $?
+      ;;
+  esac
+}
+
+# Bestaetigung fuer Schnellstart
+confirm_quickstart() {
+  local mode_desc=""
+  case "$MODE" in
+    fast)   mode_desc="Schnell (nur essentielle Logs)" ;;
+    normal) mode_desc="Standard (empfohlen)" ;;
+    full)   mode_desc="Vollstaendig (inkl. Hardware/Performance)" ;;
+  esac
+  
+  whiptail --title "Schnellstart bestaetigen" \
+    --yesno "Datensammlung starten mit:\n\n\
+  Modus: $mode_desc\n\
+  Ausgabe: $(pwd)\n\
+  Tool-Installation: Bei Bedarf nachfragen\n\n\
+Moechten Sie fortfahren?" 14 60
+  
+  return $?
+}
+
+# Hauptfunktion fuer die TUI
+run_interactive_tui() {
+  check_whiptail
+  
+  # Pruefe root-Rechte vor TUI-Start
+  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    whiptail --title "Fehler" \
+      --msgbox "Dieses Skript muss als root ausgefuehrt werden!\n\n\
+Bitte starten Sie es erneut mit:\n\
+  sudo $0 --interactive" 12 55
+    exit 1
+  fi
+  
+  # Schnellstart-Menue anzeigen
+  show_quickstart
+  local quickstart_result=$?
+  
+  if [[ $quickstart_result -eq 1 ]]; then
+    whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+    exit 0
+  elif [[ $quickstart_result -eq 2 ]]; then
+    # Schnellstart - nur Bestaetigung
+    if ! confirm_quickstart; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+  else
+    # Benutzerdefiniert - alle Dialoge durchlaufen
+    
+    # Willkommen
+    show_welcome
+    
+    # Modus auswaehlen
+    if ! select_mode; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+    
+    # Tool-Installation
+    if ! select_tool_install; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+    
+    # Zusaetzliche Optionen
+    if ! select_options; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+    
+    # Bereiche ausschliessen
+    if ! select_excludes; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+    
+    # Ausgabeverzeichnis
+    if ! select_output_dir; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+    
+    # Zusammenfassung und Bestaetigung
+    if ! show_summary; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+  fi
+  
+  # TUI beenden, normaler Ablauf wird fortgesetzt
+  whiptail --title "Starte Datensammlung" \
+    --infobox "Die Datensammlung wird gestartet...\n\n\
+Die Ausgabe erfolgt nun im Terminal." 8 50
+  
+  sleep 2
+  clear
+  
+  # Zurueck zum normalen Skript-Ablauf
+  return 0
+}
 
 # ---------- Tool-Check-System ----------
 # Prueft alle benoetigten Tools und fragt gesammelt nach Installation
@@ -731,6 +1080,11 @@ run_selftest() {
 if [[ "$RUN_SELFTEST" == "yes" ]]; then
   run_selftest
   exit 0
+fi
+
+# Interaktiver TUI-Modus
+if [[ "$INTERACTIVE" == "yes" ]]; then
+  run_interactive_tui
 fi
 
 require_root
