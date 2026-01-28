@@ -263,6 +263,7 @@ Collects diagnostically relevant system information from Proxmox VE hosts.
 Operating modes:
   Default             Standard scope (no flag)
   --full              Full data collection incl. hardware
+  -i, --interactive   Start interactive TUI (whiptail)
 
 Tool installation:
   --install-tools     Automatically install missing tools
@@ -282,6 +283,7 @@ Miscellaneous:
   -h, --help          Show this help
 
 Examples:
+  sudo ./getpvelogs.sh --interactive        # Interactive mode with TUI
   sudo ./getpvelogs.sh --full --install-tools
   sudo ./getpvelogs.sh --output-dir /tmp
   sudo ./getpvelogs.sh --exclude ceph,smart --anonymize
@@ -327,6 +329,9 @@ while [[ $# -gt 0 ]]; do
       # Self-test will be executed later
       RUN_SELFTEST="yes"
       ;;
+    -i|--interactive)
+      INTERACTIVE="yes"
+      ;;
     -v|--version)
       echo "getpvelogs.sh v${VERSION}"
       exit 0
@@ -344,6 +349,331 @@ done
 # Initialize variable for self-test if not set
 RUN_SELFTEST="${RUN_SELFTEST:-no}"
 normalize_exclude_sections
+INTERACTIVE="${INTERACTIVE:-no}"
+
+# ---------- Interactive TUI (whiptail) ----------
+
+# Check if whiptail is available
+check_whiptail() {
+  if ! have whiptail; then
+    echo "ERROR: whiptail is not installed."
+    echo "Install it with: apt-get install whiptail"
+    exit 1
+  fi
+}
+
+# Show welcome dialog
+show_welcome() {
+  whiptail --title "PVE Support Log Collector v${VERSION}" \
+    --msgbox "Welcome to the Proxmox VE Support Log Collector!\n\n\
+This tool collects diagnostically relevant system information\n\
+from Proxmox VE hosts for support.\n\n\
+Execution is read-only (except for optional tool installation).\n\n\
+Press OK to continue." 16 65
+}
+
+# Mode selection
+select_mode() {
+  local choice
+  choice=$(whiptail --title "Select Operating Mode" \
+    --radiolist "Choose data collection scope:\n\n\
+Use SPACE to select, ENTER to confirm." 16 70 2 \
+    "default" "Standard scope (recommended)" ON \
+    "full" "Complete data collection incl. hardware" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  MODE="$choice"
+  return 0
+}
+
+# Tool installation option
+select_tool_install() {
+  local choice
+  choice=$(whiptail --title "Tool Installation" \
+    --radiolist "How should missing optional tools be handled?\n\n\
+Optional tools enhance data collection (e.g. nvme-cli, ipmitool)." 16 70 3 \
+    "ask" "Ask - Prompt for each missing tool" ON \
+    "yes" "Automatic - Install missing tools without prompt" OFF \
+    "no" "Do not install - Skip missing sections" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  AUTO_INSTALL_TOOLS="$choice"
+  return 0
+}
+
+# Optional features
+select_options() {
+  local choices
+  choices=$(whiptail --title "Additional Options" \
+    --checklist "Select additional options:\n\n\
+Use SPACE to select, ENTER to confirm." 16 75 4 \
+    "anonymize" "Anonymize - Replace IPs, MACs, and hostnames" OFF \
+    "json-meta" "JSON metadata - Export metadata as JSON" OFF \
+    "verbose" "Verbose - Detailed output during collection" OFF \
+    "keep-work" "Keep working directory (do not delete)" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  # Parse selected options
+  [[ "$choices" == *"anonymize"* ]] && ANONYMIZE="yes"
+  [[ "$choices" == *"json-meta"* ]] && JSON_META="yes"
+  [[ "$choices" == *"verbose"* ]] && VERBOSE="yes"
+  [[ "$choices" == *"keep-work"* ]] && KEEP_WORK="yes"
+  
+  return 0
+}
+
+# Exclude sections (optional)
+select_excludes() {
+  if ! whiptail --title "Exclude Sections?" \
+    --yesno "Do you want to exclude specific sections from data collection?" 10 65; then
+    return 0
+  fi
+  
+  local choices
+  choices=$(whiptail --title "Exclude Sections" \
+    --checklist "Select sections to exclude:" 19 80 10 \
+    "ceph" "Ceph cluster information" OFF \
+    "smart" "SMART/NVMe disk data" OFF \
+    "network" "Network details" OFF \
+    "storage" "Storage information (LVM, ZFS, MDADM)" OFF \
+    "proxmox" "Core Proxmox-specific data" OFF \
+    "proxmox-extended" "Extended Proxmox data (VM/CT config, backup, HA, replication, SDN)" OFF \
+    "hardware" "Hardware data (IPMI, thermal; full mode only)" OFF \
+    "firewall" "Firewall and certificate data (full mode only)" OFF \
+    "performance" "Performance data (iostat, vmstat, sar; full mode only)" OFF \
+    "system-extended" "Extended system data (USB, PCI, modules, ACPI, edac, apt history, etc.)" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  # Build comma-separated list
+  if [[ -n "$choices" ]]; then
+    EXCLUDE_SECTIONS=$(echo "$choices" | tr -d '"' | tr ' ' ',')
+  fi
+  
+  return 0
+}
+
+# Select output directory (optional)
+select_output_dir() {
+  if ! whiptail --title "Ausgabeverzeichnis" \
+    --yesno "Moechten Sie ein eigenes Ausgabeverzeichnis festlegen?\n\n\
+Standard: Aktuelles Verzeichnis ($(pwd))" 10 65; then
+    return 0
+  fi
+  
+  local dir
+  dir=$(whiptail --title "Ausgabeverzeichnis" \
+    --inputbox "Geben Sie den Pfad zum Ausgabeverzeichnis ein:" 10 65 \
+    "$(pwd)" 3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  if [[ -n "$dir" ]]; then
+    OUTPUT_DIR="$dir"
+  fi
+  
+  return 0
+}
+
+# Summary and confirmation
+show_summary() {
+  local exclude_text="Keine"
+  [[ -n "$EXCLUDE_SECTIONS" ]] && exclude_text="$EXCLUDE_SECTIONS"
+  
+  local output_text="${OUTPUT_DIR:-$(pwd)}"
+  
+  local options_text=""
+  [[ "$ANONYMIZE" == "yes" ]] && options_text+="Anonymisierung, "
+  [[ "$JSON_META" == "yes" ]] && options_text+="JSON-Meta, "
+  [[ "$VERBOSE" == "yes" ]] && options_text+="Verbose, "
+  [[ "$KEEP_WORK" == "yes" ]] && options_text+="Arbeitsverz. behalten, "
+  [[ -z "$options_text" ]] && options_text="Keine"
+  options_text="${options_text%, }"  # Letztes Komma entfernen
+  
+  local install_text="Ask"
+  [[ "$AUTO_INSTALL_TOOLS" == "yes" ]] && install_text="Automatic"
+  [[ "$AUTO_INSTALL_TOOLS" == "no" ]] && install_text="Do not install"
+  
+  whiptail --title "Summary" \
+    --yesno "Please review your selection:\n\n\
+Mode: $MODE\n\
+Tool installation: $install_text\n\
+Output directory: $output_text\n\
+Excluded sections: $exclude_text\n\
+Options: $options_text\n\n\
+Start data collection now?" 17 70
+  
+  return $?
+}
+
+# Progress dialog (gauge)
+show_progress() {
+  local percent=$1
+  local message=$2
+  echo -e "XXX\n$percent\n$message\nXXX"
+}
+
+# Quick start menu
+show_quickstart() {
+  local choice
+  choice=$(whiptail --title "PVE Support Log Collector v${VERSION}" \
+    --menu "Welcome! Choose an option:\n" 17 70 4 \
+    "quick-default" "Quick Start - Standard mode (recommended)" \
+    "quick-full" "Quick Start - Full mode" \
+    "custom" "Custom - Walk through all options" \
+    "selftest" "Self-test - Show available tools" \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  case "$choice" in
+    quick-default)
+      MODE="default"
+      AUTO_INSTALL_TOOLS="ask"
+      return 2  # Signalisiert Schnellstart
+      ;;
+    quick-full)
+      MODE="full"
+      AUTO_INSTALL_TOOLS="ask"
+      return 2
+      ;;
+    custom)
+      return 0  # Weiter mit benutzerdefinierten Optionen
+      ;;
+    selftest)
+      clear
+      run_selftest
+      echo ""
+      read -rp "Press ENTER to continue..." || true
+      # Rekursiv neu starten
+      show_quickstart
+      return $?
+      ;;
+  esac
+}
+
+# Confirmation for quick start
+confirm_quickstart() {
+  local mode_desc=""
+  case "$MODE" in
+    default) mode_desc="Standard (recommended)" ;;
+    full)    mode_desc="Full (incl. hardware/performance)" ;;
+  esac
+  
+  whiptail --title "Confirm Quick Start" \
+    --yesno "Start data collection with:\n\n\
+  Modus: $mode_desc\n\
+  Ausgabe: $(pwd)\n\
+  Tool-Installation: Ask when needed\n\n\
+Continue?" 14 60
+  
+  return $?
+}
+
+# Main function for TUI
+run_interactive_tui() {
+  check_whiptail
+  
+  # Check root privileges before TUI start
+  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    whiptail --title "Error" \
+      --msgbox "This script must be run as root!\n\n\
+Please run it again with:\n\
+  sudo $0 --interactive" 12 55
+    exit 1
+  fi
+  
+  # Show quick start menu
+  show_quickstart
+  local quickstart_result=$?
+  
+  if [[ $quickstart_result -eq 1 ]]; then
+    whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
+    exit 0
+  elif [[ $quickstart_result -eq 2 ]]; then
+    # Quick start - confirmation only
+    if ! confirm_quickstart; then
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
+      exit 0
+    fi
+  else
+    # Custom - go through all dialogs
+    
+    # Welcome
+    show_welcome
+    
+    # Select mode
+    if ! select_mode; then
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
+      exit 0
+    fi
+    
+    # Tool installation
+    if ! select_tool_install; then
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
+      exit 0
+    fi
+    
+    # Additional options
+    if ! select_options; then
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
+      exit 0
+    fi
+    
+    # Exclude sections
+    if ! select_excludes; then
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
+      exit 0
+    fi
+    
+    # Output directory
+    if ! select_output_dir; then
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
+      exit 0
+    fi
+    
+    # Summary and confirmation
+    if ! show_summary; then
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
+      exit 0
+    fi
+  fi
+  
+  # End TUI, normal script flow continues
+  whiptail --title "Starting Data Collection" \
+    --infobox "Data collection is starting...\n\n\
+Output continues in the terminal." 8 50
+  
+  sleep 2
+  clear
+  
+  return 0
+}
 
 # ---------- Tool-Check-System ----------
 # Checks all required tools and prompts for installation
@@ -822,6 +1152,11 @@ run_selftest() {
 if [[ "$RUN_SELFTEST" == "yes" ]]; then
   run_selftest
   exit 0
+fi
+
+# Interaktiver TUI-Modus
+if [[ "$INTERACTIVE" == "yes" ]]; then
+  run_interactive_tui
 fi
 
 require_root

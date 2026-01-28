@@ -104,6 +104,14 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 ### Operating Modes
 
+### Interactive Mode
+
+| Parameter | Description |
+|-----------|--------------|
+| `-i`, `--interactive` | Start interactive TUI (whiptail) with guided configuration |
+
+### Operating Modes
+
 | Parameter | Description |
 |-----------|--------------|
 | Default (no flag) | Standard scope: Journal, dmesg, PVE services, network, storage, SMART, Ceph, cluster, VM/CT lists |
