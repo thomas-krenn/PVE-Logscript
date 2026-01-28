@@ -78,9 +78,9 @@ log()  { printf '[%s] %s\n' "$(date -u +'%F %T UTC')" "$*"; }
 
 warn() {
   local msg
-  msg=$(printf '[%s] WARN: %s\n' "$(date -u +'%F %T UTC')" "$*")
-  printf '%s' "$msg" >&2
-  [[ -n "$ERRORS_FILE" && -f "$ERRORS_FILE" ]] && printf '%s' "$msg" >> "$ERRORS_FILE"
+  msg="[$(date -u +'%F %T UTC')] WARN: $*"
+  printf '%s\n' "$msg" >&2
+  [[ -n "$ERRORS_FILE" && -f "$ERRORS_FILE" ]] && printf '%s\n' "$msg" >> "$ERRORS_FILE"
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -750,13 +750,74 @@ collect_hardware_extended() {
     if timeout 5s ipmitool mc info >/dev/null 2>&1; then
       note_tool_use "ipmitool"
       log_verbose "Sammle IPMI-Sensordaten..."
-      # Kuerzeres Timeout fuer IPMI-Befehle (15 Sekunden)
-      { timeout 15s ipmitool sensor list >> "$OUTDIR/ipmi_sensors.txt" 2>&1; } || warn "IPMI sensor list fehlgeschlagen"
-      { timeout 15s ipmitool sel list >> "$OUTDIR/ipmi_sel.txt" 2>&1; } || warn "IPMI sel list fehlgeschlagen"
-      { timeout 15s ipmitool fru print >> "$OUTDIR/ipmi_fru.txt" 2>&1; } || warn "IPMI fru print fehlgeschlagen"
+      
+      # BMC Info sammeln
+      {
+        echo "=== BMC Info ==="
+        timeout 10s ipmitool mc info 2>&1 || echo "(Fehler beim Abrufen)"
+        echo ""
+      } > "$OUTDIR/ipmi_info.txt"
+      
+      # Sensoren (mit Fallback-Nachricht)
+      {
+        echo "=== IPMI Sensors ==="
+        local sensor_output
+        sensor_output=$(timeout 15s ipmitool sensor list 2>&1) || true
+        if [[ -z "$sensor_output" ]]; then
+          echo "(Keine IPMI-Sensoren verfuegbar oder konfiguriert)"
+        elif [[ "$sensor_output" == *"not found"* ]] || [[ "$sensor_output" == *"Unknown"* ]]; then
+          echo "(IPMI-Sensoren nicht lesbar)"
+          echo ""
+          echo "Rohe Ausgabe:"
+          echo "$sensor_output"
+        else
+          echo "$sensor_output"
+        fi
+      } > "$OUTDIR/ipmi_sensors.txt"
+      
+      # System Event Log (mit Fallback-Nachricht)
+      {
+        echo "=== IPMI System Event Log ==="
+        local sel_output
+        sel_output=$(timeout 15s ipmitool sel list 2>&1) || true
+        if [[ -z "$sel_output" ]]; then
+          echo "(System Event Log ist leer)"
+        elif [[ "$sel_output" == *"not found"* ]]; then
+          echo "(Keine SEL-Eintraege vorhanden - System Event Log ist leer)"
+        else
+          echo "$sel_output"
+        fi
+      } > "$OUTDIR/ipmi_sel.txt"
+      
+      # FRU Daten (mit Fallback-Nachricht)
+      {
+        echo "=== IPMI FRU Data ==="
+        local fru_output
+        fru_output=$(timeout 15s ipmitool fru print 2>&1) || true
+        if [[ -z "$fru_output" ]]; then
+          echo "(Keine FRU-Daten verfuegbar)"
+        elif [[ "$fru_output" == *"Unknown FRU"* ]] || [[ "$fru_output" == *"not found"* ]]; then
+          echo "(FRU-Daten nicht konfiguriert oder nicht lesbar)"
+          echo ""
+          echo "Rohe Ausgabe:"
+          echo "$fru_output"
+        else
+          echo "$fru_output"
+        fi
+      } > "$OUTDIR/ipmi_fru.txt"
+      
     else
       log_verbose "IPMI/BMC nicht erreichbar - IPMI-Daten werden ausgelassen."
-      echo "IPMI/BMC nicht erreichbar oder nicht vorhanden." > "$OUTDIR/ipmi_info.txt"
+      {
+        echo "=== IPMI Status ==="
+        echo "IPMI/BMC nicht erreichbar oder nicht vorhanden."
+        echo ""
+        echo "Moegliche Ursachen:"
+        echo "  - System ist eine virtuelle Maschine"
+        echo "  - Kein BMC/IPMI-Controller vorhanden"
+        echo "  - IPMI-Treiber nicht geladen (ipmi_devintf, ipmi_si)"
+        echo "  - BMC nicht konfiguriert"
+      } > "$OUTDIR/ipmi_info.txt"
     fi
   else
     log_verbose "ipmitool nicht verfuegbar - IPMI-Daten werden ausgelassen."
