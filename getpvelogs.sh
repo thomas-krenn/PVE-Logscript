@@ -536,7 +536,12 @@ show_progress() {
 }
 
 # Quick start menu
+TUI_QUICKSTART="no"
+TUI_CUSTOM="no"
 show_quickstart() {
+  TUI_QUICKSTART="no"
+  TUI_CUSTOM="no"
+  
   local choice
   choice=$(whiptail --title "PVE Support Log Collector v${VERSION}" \
     --menu "Welcome! Choose an option:\n" 17 70 4 \
@@ -555,15 +560,18 @@ show_quickstart() {
     quick-default)
       MODE="default"
       AUTO_INSTALL_TOOLS="ask"
-      return 2  # Signalisiert Schnellstart
+      TUI_QUICKSTART="yes"
+      return 0
       ;;
     quick-full)
       MODE="full"
       AUTO_INSTALL_TOOLS="ask"
-      return 2
+      TUI_QUICKSTART="yes"
+      return 0
       ;;
     custom)
-      return 0  # Weiter mit benutzerdefinierten Optionen
+      TUI_CUSTOM="yes"
+      return 0
       ;;
     selftest)
       clear
@@ -573,6 +581,10 @@ show_quickstart() {
       # Rekursiv neu starten
       show_quickstart
       return $?
+      ;;
+    *)
+      # Sollte nicht passieren, aber sicherheitshalber
+      return 1
       ;;
   esac
 }
@@ -615,13 +627,14 @@ Please run it again with:\n\
   if [[ $quickstart_result -eq 1 ]]; then
     whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
     exit 0
-  elif [[ $quickstart_result -eq 2 ]]; then
+
+  if [[ "$TUI_QUICKSTART" == "yes" ]]; then
     # Quick start - confirmation only
     if ! confirm_quickstart; then
       whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
       exit 0
     fi
-  else
+  elif [[ "$TUI_CUSTOM" == "yes" ]]; then
     # Custom - go through all dialogs
     
     # Welcome
