@@ -145,12 +145,12 @@ generate_checksums() {
 
 # Schreibt JSON-Metadaten
 write_json_meta() {
-  [[ "$JSON_META" != "yes" ]] && return
+  [[ "$JSON_META" != "yes" ]] && return 0
   
   local tools_json=""
   if [[ -f "$TOOLS_USED_FILE" && -s "$TOOLS_USED_FILE" ]]; then
     # Tools als JSON-Array formatieren
-    tools_json=$(awk 'BEGIN{ORS=""} {if(NR>1)printf ","; printf "\"%s\"", $0}' "$TOOLS_USED_FILE")
+    tools_json=$(awk 'BEGIN{ORS=""} {if(NR>1)printf ","; printf "\"%s\"", $0}' "$TOOLS_USED_FILE") || true
   fi
   
   cat > "$OUTDIR/_meta.json" <<EOF
@@ -166,6 +166,7 @@ write_json_meta() {
 }
 EOF
   log_verbose "JSON-Metadaten geschrieben: _meta.json"
+  return 0
 }
 
 require_root() {
@@ -762,6 +763,8 @@ collect_hardware_extended() {
   else
     log_verbose "lm-sensors nicht verfuegbar - Thermal-Daten werden ausgelassen."
   fi
+  
+  return 0
 }
 
 # Proxmox-Datensammler: VM/CT-Configs, Backup, HA, Replication, etc. (nur --full)
@@ -840,6 +843,8 @@ collect_pve_extended() {
     note_tool_use "proxmox-backup-client"
     run_quick "$OUTDIR/pbs_status.txt" proxmox-backup-client version
   fi
+  
+  return 0
 }
 
 # Firewall-Datensammler (nur --full)
@@ -889,6 +894,8 @@ collect_firewall() {
   
   # SSH Config (ohne private Keys!)
   [[ -f /etc/ssh/sshd_config ]] && cp /etc/ssh/sshd_config "$OUTDIR/sshd_config.txt" 2>/dev/null || true
+  
+  return 0
 }
 
 # Performance-Datensammler (nur --full)
@@ -927,6 +934,8 @@ collect_performance() {
     run "$OUTDIR/sar_cpu.txt" sar -u 1 5
     run "$OUTDIR/sar_disk.txt" sar -d 1 5
   fi
+  
+  return 0
 }
 
 # System-Erweiterungen (nur --full)
@@ -953,6 +962,8 @@ collect_system_extended() {
     echo "=== Systemd Timers ==="
     systemctl list-timers --all --no-pager 2>/dev/null || echo "(nicht verfuegbar)"
   } >> "$OUTDIR/systemd_timers.txt" 2>&1
+  
+  return 0
 }
 
 # ---------- Anonymisierung ----------
@@ -1004,6 +1015,7 @@ anonymize_output() {
   } >> "$OUTDIR/_meta.txt"
   
   log "Anonymisierung abgeschlossen."
+  return 0
 }
 
 # ---------- Selbsttest ----------
@@ -1491,18 +1503,18 @@ done
 # ---------- Erweiterte Datensammlung (nur --full Modus) ----------
 if is_mode_full; then
   log "Sammle erweiterte Daten (--full Modus)..."
-  collect_hardware_extended
-  collect_pve_extended
-  collect_firewall
-  collect_performance
-  collect_system_extended
+  collect_hardware_extended || true
+  collect_pve_extended || true
+  collect_firewall || true
+  collect_performance || true
+  collect_system_extended || true
 fi
 
 # ---------- JSON-Metadaten ----------
-write_json_meta
+write_json_meta || true
 
 # ---------- Anonymisierung (VOR dem Archivieren) ----------
-anonymize_output
+anonymize_output || true
 
 # ---------- Pack ----------
 log "Packe Archiv..."
