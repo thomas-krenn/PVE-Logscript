@@ -96,25 +96,15 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 ---
 
-## Betriebsmodi
-
-| Modus | Flag | Beschreibung |
-|-------|------|--------------|
-| **Fast** | `--fast` | Nur essentielle Logs: Journal, dmesg, PVE-Services, Netzwerk-Basis |
-| **Normal** | `--normal` | Fast + Storage, SMART, Ceph, Cluster, VM/CT-Listen (Standard) |
-| **Full** | `--full` | Normal + Hardware (IPMI, Thermal), VM/CT-Configs, Firewall, Performance, Backup/HA/Replication |
-
----
-
 ## Parameter
 
 ### Betriebsmodi
 
 | Parameter | Beschreibung |
 |-----------|--------------|
-| `--fast` | Nur essentielle Logs sammeln (schnell) |
-| `--normal` | Standard-Umfang (Default) |
-| `--full` | Vollständige Datensammlung inkl. Hardware |
+| `--fast` | Nur essentielle Logs: Journal, dmesg, PVE-Services, Netzwerk-Basis |
+| `--normal` | Fast + Storage, SMART, Ceph, Cluster, VM/CT-Listen (Standard) |
+| `--full` | Normal + Hardware (IPMI, Thermal), VM/CT-Configs, Firewall, Performance, Backup/HA/Replication |
 
 ### Tool-Installation
 
