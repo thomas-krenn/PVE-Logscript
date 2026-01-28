@@ -238,6 +238,17 @@ log "Sammle Basisinformationen..."
 
 # Meta-Informationen gesammelt schreiben
 {
+  echo "========================================"
+  echo "  PVE Support Log Collector"
+  echo "========================================"
+  echo ""
+  echo "Tool-Version:    $VERSION"
+  echo "Hostname:        $HOST"
+  echo "Seriennummer:    $SN"
+  echo "Ausgefuehrt am:  $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+  echo ""
+  echo "========================================"
+  echo ""
   echo "=== System Information ==="
   uname -a
   echo ""
