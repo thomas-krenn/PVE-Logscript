@@ -744,13 +744,20 @@ collect_hardware_extended() {
   
   log_verbose "Sammle erweiterte Hardware-Informationen..."
   
-  # IPMI/BMC
+  # IPMI/BMC - mit schneller Vorab-Pruefung
   if have ipmitool; then
-    note_tool_use "ipmitool"
-    log_verbose "Sammle IPMI-Sensordaten..."
-    run "$OUTDIR/ipmi_sensors.txt" ipmitool sensor list
-    run "$OUTDIR/ipmi_sel.txt" ipmitool sel list
-    run "$OUTDIR/ipmi_fru.txt" ipmitool fru print
+    # Schneller Test ob IPMI ueberhaupt verfuegbar ist (max 5 Sekunden)
+    if timeout 5s ipmitool mc info >/dev/null 2>&1; then
+      note_tool_use "ipmitool"
+      log_verbose "Sammle IPMI-Sensordaten..."
+      # Kuerzeres Timeout fuer IPMI-Befehle (15 Sekunden)
+      { timeout 15s ipmitool sensor list >> "$OUTDIR/ipmi_sensors.txt" 2>&1; } || warn "IPMI sensor list fehlgeschlagen"
+      { timeout 15s ipmitool sel list >> "$OUTDIR/ipmi_sel.txt" 2>&1; } || warn "IPMI sel list fehlgeschlagen"
+      { timeout 15s ipmitool fru print >> "$OUTDIR/ipmi_fru.txt" 2>&1; } || warn "IPMI fru print fehlgeschlagen"
+    else
+      log_verbose "IPMI/BMC nicht erreichbar - IPMI-Daten werden ausgelassen."
+      echo "IPMI/BMC nicht erreichbar oder nicht vorhanden." > "$OUTDIR/ipmi_info.txt"
+    fi
   else
     log_verbose "ipmitool nicht verfuegbar - IPMI-Daten werden ausgelassen."
   fi
