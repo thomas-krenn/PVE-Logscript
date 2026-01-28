@@ -1,6 +1,6 @@
 # Proxmox VE Support Log Collector
 
-**Version:** 3.1.0 — 10/2025
+**Version:** 3.2.0 — 01/2026
 
 **Autor:** Samuel Müller
 
@@ -53,12 +53,13 @@ Die Ausführung erfolgt **read-only**, mit Ausnahme der **optionalen Installatio
 
 ## Parameter
 
-| Parameter         | Beschreibung                                                   |
-| ----------------- | -------------------------------------------------------------- |
-| `--install-tools` | Installiert fehlende Tools ohne Rückfrage                      |
-| `--no-install`    | Installiert keine Tools; fehlende Bereiche werden übersprungen |
-| `--keep-work`     | Temporäres Arbeitsverzeichnis wird nicht gelöscht              |
-| `-h`, `--help`    | Zeigt die Hilfe an                                             |
+| Parameter          | Beschreibung                                                   |
+| ------------------ | -------------------------------------------------------------- |
+| `--install-tools`  | Installiert fehlende Tools ohne Rückfrage                      |
+| `--no-install`     | Installiert keine Tools; fehlende Bereiche werden übersprungen |
+| `--keep-work`      | Temporäres Arbeitsverzeichnis wird nicht gelöscht              |
+| `-v`, `--version`  | Zeigt die Versionsnummer an                                    |
+| `-h`, `--help`     | Zeigt die Hilfe an                                             |
 
 ---
 
@@ -100,10 +101,19 @@ Die Ausführung sollte ausschließlich durch **fachkundige Personen** erfolgen.
 
 ---
 
+## Technische Details
+
+* **Minimaler Speicherplatz:** Das Skript prüft vor der Ausführung, ob mindestens 500 MB freier Speicherplatz verfügbar sind.
+* **Timeout:** Potentiell langsame Befehle (z.B. Ceph-Abfragen) haben ein automatisches Timeout von 60 Sekunden.
+* **Cleanup:** Bei Abbruch (Ctrl+C) wird das temporäre Arbeitsverzeichnis automatisch aufgeräumt.
+* **Laufwerkserkennung:** Unterstützt erweiterte Laufwerksbezeichnungen (sda-sdz sowie sdaa-sdzz).
+
+---
+
 ## Empfehlung
 
 * **Vor Ausführung:**
-  Sicherstellen, dass ausreichend freier Speicherplatz vorhanden ist.
+  Das Skript prüft automatisch den verfügbaren Speicherplatz. Bei weniger als 500 MB wird die Ausführung abgebrochen.
 
 * **Nach Ausführung:**
   Das erzeugte Archiv befindet sich im lokalen Arbeitsverzeichnis und kann direkt für Supportzwecke weitergegeben werden.
