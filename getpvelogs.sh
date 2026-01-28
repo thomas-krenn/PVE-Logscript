@@ -329,10 +329,10 @@ select_mode() {
   local choice
   choice=$(whiptail --title "Betriebsmodus waehlen" \
     --radiolist "Waehlen Sie den Umfang der Datensammlung:\n\n\
-Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 70 3 \
-    "fast" "Schnell - Nur essentielle Logs (Journal, dmesg, Services)" OFF \
-    "normal" "Standard - Fast + Storage, SMART, Ceph, Cluster [Empfohlen]" ON \
-    "full" "Vollstaendig - Alles inkl. Hardware, VM-Configs, Performance" OFF \
+Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 78 3 \
+    "fast" "Schnell: Journal, dmesg, Services, Netzwerk" OFF \
+    "normal" "Standard: + Storage, SMART, Ceph, Cluster [Empfohlen]" ON \
+    "full" "Vollstaendig: + Hardware, VM-Configs, Performance" OFF \
     3>&1 1>&2 2>&3)
   
   local exitstatus=$?
@@ -673,21 +673,23 @@ check_all_tools() {
 install_missing_tools() {
   if ! have apt-get; then
     warn "Kein apt-get verfuegbar - Installation nicht moeglich."
-    return 1
+    return 0  # Kein Fehler, nur Warnung
   fi
   
   log "Aktualisiere Paketlisten..."
-  apt-get update -qq
+  apt-get update -qq || warn "apt-get update fehlgeschlagen"
   
   for pkg in "${!MISSING_TOOLS[@]}"; do
     log "Installiere $pkg..."
     if DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" >/dev/null 2>&1; then
       note_tool_use "$pkg (nachinstalliert)"
-      unset "MISSING_TOOLS[$pkg]"
+      unset "MISSING_TOOLS[$pkg]" || true
     else
       warn "Installation von $pkg fehlgeschlagen."
     fi
   done
+  
+  return 0
 }
 
 prompt_install_tools() {
@@ -702,23 +704,25 @@ prompt_install_tools() {
   
   case "$AUTO_INSTALL_TOOLS" in
     yes)
-      install_missing_tools
+      install_missing_tools || true
       ;;
     no)
-      warn "Tools werden nicht installiert - einige Bereiche werden ausgelassen."
+      log "Tools werden nicht installiert - einige Bereiche werden ausgelassen."
       ;;
     ask)
       read -rp "Moechten Sie die fehlenden Tools installieren? [y/N] " ans || true
       case "$ans" in
         y|Y)
-          install_missing_tools
+          install_missing_tools || true
           ;;
         *)
-          warn "Tools werden nicht installiert - einige Bereiche werden ausgelassen."
+          log "Tools werden nicht installiert - einige Bereiche werden ausgelassen."
           ;;
       esac
       ;;
   esac
+  
+  return 0
 }
 
 # Legacy-Funktion fuer Kompatibilitaet (wird nicht mehr direkt verwendet)
