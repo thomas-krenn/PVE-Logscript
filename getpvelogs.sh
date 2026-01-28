@@ -494,40 +494,51 @@ show_progress() {
 }
 
 # Schnellstart-Menue
+# Setzt TUI_QUICKSTART="yes" wenn Schnellstart gewaehlt wurde
+# Setzt TUI_CUSTOM="yes" wenn benutzerdefiniert gewaehlt wurde
+# Return 0 = Erfolg, Return 1 = Abgebrochen
+TUI_QUICKSTART="no"
+TUI_CUSTOM="no"
+
 show_quickstart() {
+  TUI_QUICKSTART="no"
+  TUI_CUSTOM="no"
+  
   local choice
   choice=$(whiptail --title "PVE Support Log Collector v${VERSION}" \
-    --menu "Willkommen! Waehlen Sie eine Option:\n" 18 70 5 \
+    --menu "Willkommen! Waehlen Sie eine Option:" 18 70 5 \
     "quick-normal" "Schnellstart - Standardmodus (empfohlen)" \
     "quick-full" "Schnellstart - Vollstaendiger Modus" \
     "quick-fast" "Schnellstart - Nur essentielle Logs" \
     "custom" "Benutzerdefiniert - Alle Optionen durchgehen" \
     "selftest" "Systemtest - Verfuegbare Tools anzeigen" \
-    3>&1 1>&2 2>&3)
-  
-  local exitstatus=$?
-  if [[ $exitstatus -ne 0 ]]; then
-    return 1
-  fi
+    3>&1 1>&2 2>&3) || {
+      # Benutzer hat Abbrechen gedrueckt
+      return 1
+    }
   
   case "$choice" in
     quick-normal)
       MODE="normal"
       AUTO_INSTALL_TOOLS="ask"
-      return 2  # Signalisiert Schnellstart
+      TUI_QUICKSTART="yes"
+      return 0
       ;;
     quick-full)
       MODE="full"
       AUTO_INSTALL_TOOLS="ask"
-      return 2
+      TUI_QUICKSTART="yes"
+      return 0
       ;;
     quick-fast)
       MODE="fast"
       AUTO_INSTALL_TOOLS="no"
-      return 2
+      TUI_QUICKSTART="yes"
+      return 0
       ;;
     custom)
-      return 0  # Weiter mit benutzerdefinierten Optionen
+      TUI_CUSTOM="yes"
+      return 0
       ;;
     selftest)
       clear
@@ -537,6 +548,10 @@ show_quickstart() {
       # Rekursiv neu starten
       show_quickstart
       return $?
+      ;;
+    *)
+      # Sollte nicht passieren, aber sicherheitshalber
+      return 1
       ;;
   esac
 }
@@ -574,19 +589,18 @@ Bitte starten Sie es erneut mit:\n\
   fi
   
   # Schnellstart-Menue anzeigen
-  show_quickstart
-  local quickstart_result=$?
-  
-  if [[ $quickstart_result -eq 1 ]]; then
+  if ! show_quickstart; then
     whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
     exit 0
-  elif [[ $quickstart_result -eq 2 ]]; then
+  fi
+  
+  if [[ "$TUI_QUICKSTART" == "yes" ]]; then
     # Schnellstart - nur Bestaetigung
     if ! confirm_quickstart; then
       whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
       exit 0
     fi
-  else
+  elif [[ "$TUI_CUSTOM" == "yes" ]]; then
     # Benutzerdefiniert - alle Dialoge durchlaufen
     
     # Willkommen
