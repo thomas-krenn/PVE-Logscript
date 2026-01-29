@@ -81,12 +81,14 @@ warn() {
   msg=$(printf '[%s] WARN: %s\n' "$(date -u +'%F %T UTC')" "$*")
   printf '%s' "$msg" >&2
   [[ -n "$ERRORS_FILE" && -f "$ERRORS_FILE" ]] && printf '%s' "$msg" >> "$ERRORS_FILE"
+  return 0
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
 note_tool_use() {
   [[ -n "$TOOLS_USED_FILE" && -f "$TOOLS_USED_FILE" ]] && echo "$1" >> "$TOOLS_USED_FILE"
+  return 0
 }
 
 # Verbesserte run-Funktion mit optionalem Timeout
@@ -112,6 +114,7 @@ run_quick() {
 # Verbose-Logging
 log_verbose() {
   [[ "$VERBOSE" == "yes" ]] && printf '[%s] %s\n' "$(date -u +'%F %T UTC')" "$*"
+  return 0
 }
 
 # Prueft ob ein Bereich ausgeschlossen ist
