@@ -475,14 +475,12 @@ show_summary() {
   
   whiptail --title "Zusammenfassung" \
     --yesno "Bitte ueberpruefen Sie Ihre Auswahl:\n\n\
-╔══════════════════════════════════════════════════╗\n\
-║  Betriebsmodus:      $MODE\n\
-║  Tool-Installation:  $install_text\n\
-║  Ausgabeverzeichnis: $output_text\n\
-║  Ausgeschlossen:     $exclude_text\n\
-║  Optionen:           $options_text\n\
-╚══════════════════════════════════════════════════╝\n\n\
-Moechten Sie die Datensammlung jetzt starten?" 20 70
+  Betriebsmodus:       $MODE\n\
+  Tool-Installation:   $install_text\n\
+  Ausgabeverzeichnis:  $output_text\n\
+  Ausgeschlossen:      $exclude_text\n\
+  Optionen:            $options_text\n\n\
+Moechten Sie die Datensammlung jetzt starten?" 18 70
   
   return $?
 }
