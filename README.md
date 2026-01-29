@@ -14,6 +14,13 @@ Dieses Skript sammelt diagnostisch relevante Systeminformationen von **Proxmox V
 
 Die Ausführung erfolgt **read-only**, mit Ausnahme der **optionalen Installation von Tools** wie `nvme-cli`, `ipmitool`, `lm-sensors` und `sysstat`.
 
+## Version mit TUI
+Eine Version des Tools mit TUI (Textbasierter Benutzeroberfläche) finden Sie hier:  
+https://github.com/thomas-krenn/PVE-Logscript/tree/tui
+
+Die TUI-Version ermöglicht die komfortable Auswahl der zu sammelnden Informationsbereiche über ein Menüsystem und bietet Statusanzeigen für den Sammlungsfortschritt. Sie benötigen dafür das Zusatzpaket `dialog` (wird während der Ausführung automatisch geprüft). Die Bedienung ist vollständig per Tastatur möglich. Alle im Standard-Skript verfügbaren Optionen (Betriebsmodus, Anonymisierung, Zielverzeichnis etc.) stehen dort ebenfalls zur Verfügung.
+
+
 ---
 
 ## Neuerungen in Version 4.0
