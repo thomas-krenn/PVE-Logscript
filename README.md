@@ -1,4 +1,4 @@
-# Proxmox VE Support Log Collector
+# Proxmox VE Support Log Collector mit TUI
 
 **Version:** 4.0.2-tui — 01/2026
 
