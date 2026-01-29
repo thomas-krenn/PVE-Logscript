@@ -12,7 +12,7 @@
 #   abgesehen von der optionalen Installation von Tools wie nvme-cli, ipmitool, etc.
 #
 # Funktionsumfang:
-#   - Drei Betriebsmodi: --fast, --normal (Default), --full
+#   - Zwei Betriebsmodi: --normal (Default), --full
 #   - Fortschritt-Ausgabe auf STDOUT (Sammle / Kopiere / Packe)
 #   - Erfassung von Kernel-, Journal-, System-, Storage- und Netzwerkdaten
 #   - Aggregation von Proxmox-Service- sowie VM/CT-Informationen
@@ -28,8 +28,8 @@
 #   - Checksummen-Generierung (SHA256/MD5)
 #
 # Betriebsmodi:
-#   --fast    Nur essentielle Logs (Journal, dmesg, PVE-Services, Netzwerk-Basis)
-#   --normal  Fast + Storage, SMART, Ceph, Cluster, VM/CT-Listen (Default)
+#   --normal  Standard-Umfang: Journal, dmesg, PVE-Services, Netzwerk,
+#             Storage, SMART, Ceph, Cluster, VM/CT-Listen (Default)
 #   --full    Normal + Hardware (IPMI, Thermal), VM/CT-Configs, Firewall,
 #             Performance, Backup/HA/Replication
 #
@@ -63,7 +63,7 @@ TOOLS_USED_FILE=""
 OUTDIR=""
 
 # ---------- Neue Optionen (v4.0) ----------
-MODE="normal"              # fast|normal|full
+MODE="normal"              # normal|full
 VERBOSE="no"               # yes|no
 ANONYMIZE="no"             # yes|no
 OUTPUT_DIR=""              # Benutzerdefiniertes Ausgabeverzeichnis
@@ -210,7 +210,6 @@ Interaktiver Modus:
   -i, --interactive   Interaktive TUI (whiptail) starten
 
 Betriebsmodi:
-  --fast              Nur essentielle Logs (schnell)
   --normal            Standard-Umfang (Default)
   --full              Vollstaendige Datensammlung inkl. Hardware
 
@@ -234,7 +233,7 @@ Sonstiges:
 Beispiele:
   sudo ./getpvelogs.sh --interactive        # Interaktiver Modus mit TUI
   sudo ./getpvelogs.sh --full --install-tools
-  sudo ./getpvelogs.sh --fast --output-dir /tmp
+  sudo ./getpvelogs.sh --normal --output-dir /tmp
   sudo ./getpvelogs.sh --normal --exclude ceph,smart --anonymize
 
 EOF
@@ -245,7 +244,6 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     # Betriebsmodi
-    --fast)           MODE="fast"            ;;
     --normal)         MODE="normal"          ;;
     --full)           MODE="full"            ;;
     
@@ -330,9 +328,8 @@ select_mode() {
   local choice
   choice=$(whiptail --title "Betriebsmodus waehlen" \
     --radiolist "Waehlen Sie den Umfang der Datensammlung:\n\n\
-Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 78 3 \
-    "fast" "Schnell: Journal, dmesg, Services, Netzwerk" OFF \
-    "normal" "Standard: + Storage, SMART, Ceph, Cluster [Empfohlen]" ON \
+Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 16 78 2 \
+    "normal" "Standard: Journal, dmesg, Storage, SMART, Ceph, Cluster [Empfohlen]" ON \
     "full" "Vollstaendig: + Hardware, VM-Configs, Performance" OFF \
     3>&1 1>&2 2>&3)
   
@@ -505,10 +502,9 @@ show_quickstart() {
   
   local choice
   choice=$(whiptail --title "PVE Support Log Collector v${VERSION}" \
-    --menu "Willkommen! Waehlen Sie eine Option:" 18 70 5 \
+    --menu "Willkommen! Waehlen Sie eine Option:" 16 70 4 \
     "quick-normal" "Schnellstart - Standardmodus (empfohlen)" \
     "quick-full" "Schnellstart - Vollstaendiger Modus" \
-    "quick-fast" "Schnellstart - Nur essentielle Logs" \
     "custom" "Benutzerdefiniert - Alle Optionen durchgehen" \
     "selftest" "Systemtest - Verfuegbare Tools anzeigen" \
     3>&1 1>&2 2>&3) || {
@@ -526,12 +522,6 @@ show_quickstart() {
     quick-full)
       MODE="full"
       AUTO_INSTALL_TOOLS="ask"
-      TUI_QUICKSTART="yes"
-      return 0
-      ;;
-    quick-fast)
-      MODE="fast"
-      AUTO_INSTALL_TOOLS="no"
       TUI_QUICKSTART="yes"
       return 0
       ;;
@@ -559,7 +549,6 @@ show_quickstart() {
 confirm_quickstart() {
   local mode_desc=""
   case "$MODE" in
-    fast)   mode_desc="Schnell (nur essentielle Logs)" ;;
     normal) mode_desc="Standard (empfohlen)" ;;
     full)   mode_desc="Vollstaendig (inkl. Hardware/Performance)" ;;
   esac
@@ -1430,7 +1419,7 @@ if have pveversion && ! is_excluded "proxmox"; then
   run_quick "$OUTDIR/proxmox/pveversion.txt" pveversion -v
   have pvereport && run "$OUTDIR/pvereport.txt" pvereport
 
-  # Services (immer sammeln, auch im fast-Modus)
+  # Services
   {
     echo "=== Failed Units ==="
     systemctl --failed 2>/dev/null || true

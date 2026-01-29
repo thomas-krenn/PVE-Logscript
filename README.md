@@ -19,7 +19,7 @@ Die Ausführung erfolgt **read-only**, mit Ausnahme der **optionalen Installatio
 ## Neuerungen in Version 4.0
 
 * **Interaktive TUI:** Neuer geführter Modus mit `--interactive` (whiptail-basiert)
-* **Drei Betriebsmodi:** `--fast`, `--normal` (Standard), `--full`
+* **Zwei Betriebsmodi:** `--normal` (Standard), `--full`
 * **Automatische Tool-Erkennung:** Alle benötigten Tools werden vor der Sammlung geprüft und bei Bedarf gesammelt nachinstalliert
 * **Anonymisierung:** Mit `--anonymize` werden IPs, MACs und Hostnamen automatisch ersetzt
 * **Erweiterte Hardware-Daten:** IPMI/BMC-Sensoren, Thermal-Daten (im `--full` Modus)
@@ -89,7 +89,7 @@ Mit dem Parameter `--interactive` (oder `-i`) startet das Skript eine benutzerfr
 
 Im benutzerdefinierten Modus werden Sie durch folgende Dialoge geführt:
 
-1. **Betriebsmodus** - Wahl zwischen fast/normal/full
+1. **Betriebsmodus** - Wahl zwischen normal/full
 2. **Tool-Installation** - Verhalten bei fehlenden Tools
 3. **Zusätzliche Optionen** - Anonymisierung, JSON-Meta, Verbose, etc.
 4. **Bereiche ausschließen** - Optional Ceph, SMART, etc. überspringen
@@ -116,9 +116,6 @@ sudo ./getpvelogs.sh --interactive
 
 # Standard-Ausführung (normal Modus) mit interaktiver Abfrage
 sudo ./getpvelogs.sh
-
-# Schnelle Ausführung - nur essentielle Logs
-sudo ./getpvelogs.sh --fast
 
 # Vollständige Datensammlung inkl. Hardware und Performance
 sudo ./getpvelogs.sh --full --install-tools
@@ -153,8 +150,7 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 | Parameter | Beschreibung |
 |-----------|--------------|
-| `--fast` | Nur essentielle Logs: Journal, dmesg, PVE-Services, Netzwerk-Basis |
-| `--normal` | Fast + Storage, SMART, Ceph, Cluster, VM/CT-Listen (Standard) |
+| `--normal` | Standard-Umfang: Journal, dmesg, PVE-Services, Netzwerk, Storage, SMART, Ceph, Cluster, VM/CT-Listen (Standard) |
 | `--full` | Normal + Hardware (IPMI, Thermal), VM/CT-Configs, Firewall, Performance, Backup/HA/Replication |
 
 ### Tool-Installation
