@@ -1,6 +1,6 @@
 # Proxmox VE Support Log Collector
 
-**Version:** 4.0.0 — 01/2026
+**Version:** 4.0.2-tui — 01/2026
 
 **Autor:** Samuel Müller
 
@@ -75,7 +75,7 @@ Mit dem Parameter `--interactive` (oder `-i`) startet das Skript eine benutzerfr
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ PVE Support Log Collector v4.0.0                                 │
+│ PVE Support Log Collector v4.0.2-tui                             │
 ├──────────────────────────────────────────────────────────────────┤
 │ ○ Schnellstart - Standardmodus (empfohlen)                       │
 │ ○ Schnellstart - Vollständiger Modus                             │
