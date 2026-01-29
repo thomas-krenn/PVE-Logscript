@@ -18,7 +18,7 @@ Die Ausführung erfolgt **read-only**, mit Ausnahme der **optionalen Installatio
 
 ## Neuerungen in Version 4.0
 
-* **Drei Betriebsmodi:** `--fast`, `--normal` (Standard), `--full`
+* **Zwei Betriebsmodi:** `--normal` (Standard), `--full`
 * **Automatische Tool-Erkennung:** Alle benötigten Tools werden vor der Sammlung geprüft und bei Bedarf gesammelt nachinstalliert
 * **Anonymisierung:** Mit `--anonymize` werden IPs, MACs und Hostnamen automatisch ersetzt
 * **Erweiterte Hardware-Daten:** IPMI/BMC-Sensoren, Thermal-Daten (im `--full` Modus)
@@ -72,9 +72,6 @@ curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpv
 # Standard-Ausführung (normal Modus) mit interaktiver Abfrage
 sudo ./getpvelogs.sh
 
-# Schnelle Ausführung - nur essentielle Logs
-sudo ./getpvelogs.sh --fast
-
 # Vollständige Datensammlung inkl. Hardware und Performance
 sudo ./getpvelogs.sh --full --install-tools
 
@@ -102,8 +99,7 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 | Parameter | Beschreibung |
 |-----------|--------------|
-| `--fast` | Nur essentielle Logs: Journal, dmesg, PVE-Services, Netzwerk-Basis |
-| `--normal` | Fast + Storage, SMART, Ceph, Cluster, VM/CT-Listen (Standard) |
+| `--normal` | Standard-Umfang: Journal, dmesg, PVE-Services, Netzwerk, Storage, SMART, Ceph, Cluster, VM/CT-Listen (Standard) |
 | `--full` | Normal + Hardware (IPMI, Thermal), VM/CT-Configs, Firewall, Performance, Backup/HA/Replication |
 
 ### Tool-Installation

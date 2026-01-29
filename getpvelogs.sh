@@ -12,7 +12,7 @@
 #   abgesehen von der optionalen Installation von Tools wie nvme-cli, ipmitool, etc.
 #
 # Funktionsumfang:
-#   - Drei Betriebsmodi: --fast, --normal (Default), --full
+#   - Zwei Betriebsmodi: --normal (Default), --full
 #   - Fortschritt-Ausgabe auf STDOUT (Sammle / Kopiere / Packe)
 #   - Erfassung von Kernel-, Journal-, System-, Storage- und Netzwerkdaten
 #   - Aggregation von Proxmox-Service- sowie VM/CT-Informationen
@@ -28,8 +28,8 @@
 #   - Checksummen-Generierung (SHA256/MD5)
 #
 # Betriebsmodi:
-#   --fast    Nur essentielle Logs (Journal, dmesg, PVE-Services, Netzwerk-Basis)
-#   --normal  Fast + Storage, SMART, Ceph, Cluster, VM/CT-Listen (Default)
+#   --normal  Standard-Umfang: Journal, dmesg, PVE-Services, Netzwerk,
+#             Storage, SMART, Ceph, Cluster, VM/CT-Listen (Default)
 #   --full    Normal + Hardware (IPMI, Thermal), VM/CT-Configs, Firewall,
 #             Performance, Backup/HA/Replication
 #
@@ -63,7 +63,7 @@ TOOLS_USED_FILE=""
 OUTDIR=""
 
 # ---------- Neue Optionen (v4.0) ----------
-MODE="normal"              # fast|normal|full
+MODE="normal"              # normal|full
 VERBOSE="no"               # yes|no
 ANONYMIZE="no"             # yes|no
 OUTPUT_DIR=""              # Benutzerdefiniertes Ausgabeverzeichnis
@@ -78,9 +78,9 @@ log()  { printf '[%s] %s\n' "$(date -u +'%F %T UTC')" "$*"; }
 
 warn() {
   local msg
-  msg=$(printf '[%s] WARN: %s\n' "$(date -u +'%F %T UTC')" "$*")
-  printf '%s' "$msg" >&2
-  [[ -n "$ERRORS_FILE" && -f "$ERRORS_FILE" ]] && printf '%s' "$msg" >> "$ERRORS_FILE"
+  msg=$(printf '[%s] WARN: %s' "$(date -u +'%F %T UTC')" "$*")
+  printf '%s\n' "$msg" >&2
+  [[ -n "$ERRORS_FILE" && -f "$ERRORS_FILE" ]] && printf '%s\n' "$msg" >> "$ERRORS_FILE"
   return 0
 }
 
@@ -209,7 +209,6 @@ Proxmox VE Support Log Collector v${VERSION}
 Sammelt diagnostisch relevante Systeminformationen von Proxmox VE Hosts.
 
 Betriebsmodi:
-  --fast              Nur essentielle Logs (schnell)
   --normal            Standard-Umfang (Default)
   --full              Vollstaendige Datensammlung inkl. Hardware
 
@@ -232,7 +231,7 @@ Sonstiges:
 
 Beispiele:
   sudo ./getpvelogs.sh --full --install-tools
-  sudo ./getpvelogs.sh --fast --output-dir /tmp
+  sudo ./getpvelogs.sh --normal --output-dir /tmp
   sudo ./getpvelogs.sh --normal --exclude ceph,smart --anonymize
 
 EOF
@@ -243,7 +242,6 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     # Betriebsmodi
-    --fast)           MODE="fast"            ;;
     --normal)         MODE="normal"          ;;
     --full)           MODE="full"            ;;
     
@@ -975,7 +973,7 @@ if have pveversion && ! is_excluded "proxmox"; then
   run_quick "$OUTDIR/pveversion.txt" pveversion -v
   have pvereport && run "$OUTDIR/pvereport.txt" pvereport
 
-  # Services (immer sammeln, auch im fast-Modus)
+  # Services
   {
     echo "=== Failed Units ==="
     systemctl --failed 2>/dev/null || true
