@@ -78,9 +78,9 @@ log()  { printf '[%s] %s\n' "$(date -u +'%F %T UTC')" "$*"; }
 
 warn() {
   local msg
-  msg=$(printf '[%s] WARN: %s\n' "$(date -u +'%F %T UTC')" "$*")
-  printf '%s' "$msg" >&2
-  [[ -n "$ERRORS_FILE" && -f "$ERRORS_FILE" ]] && printf '%s' "$msg" >> "$ERRORS_FILE"
+  msg="[$(date -u +'%F %T UTC')] WARN: $*"
+  printf '%s\n' "$msg" >&2
+  [[ -n "$ERRORS_FILE" && -f "$ERRORS_FILE" ]] && printf '%s\n' "$msg" >> "$ERRORS_FILE"
 }
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -145,12 +145,12 @@ generate_checksums() {
 
 # Schreibt JSON-Metadaten
 write_json_meta() {
-  [[ "$JSON_META" != "yes" ]] && return
+  [[ "$JSON_META" != "yes" ]] && return 0
   
   local tools_json=""
   if [[ -f "$TOOLS_USED_FILE" && -s "$TOOLS_USED_FILE" ]]; then
     # Tools als JSON-Array formatieren
-    tools_json=$(awk 'BEGIN{ORS=""} {if(NR>1)printf ","; printf "\"%s\"", $0}' "$TOOLS_USED_FILE")
+    tools_json=$(awk 'BEGIN{ORS=""} {if(NR>1)printf ","; printf "\"%s\"", $0}' "$TOOLS_USED_FILE") || true
   fi
   
   cat > "$OUTDIR/_meta.json" <<EOF
@@ -166,6 +166,7 @@ write_json_meta() {
 }
 EOF
   log_verbose "JSON-Metadaten geschrieben: _meta.json"
+  return 0
 }
 
 require_root() {
@@ -205,6 +206,9 @@ Usage: getpvelogs.sh [OPTIONS]
 Proxmox VE Support Log Collector v${VERSION}
 Sammelt diagnostisch relevante Systeminformationen von Proxmox VE Hosts.
 
+Interaktiver Modus:
+  -i, --interactive   Interaktive TUI (whiptail) starten
+
 Betriebsmodi:
   --fast              Nur essentielle Logs (schnell)
   --normal            Standard-Umfang (Default)
@@ -228,6 +232,7 @@ Sonstiges:
   -h, --help          Diese Hilfe anzeigen
 
 Beispiele:
+  sudo ./getpvelogs.sh --interactive        # Interaktiver Modus mit TUI
   sudo ./getpvelogs.sh --full --install-tools
   sudo ./getpvelogs.sh --fast --output-dir /tmp
   sudo ./getpvelogs.sh --normal --exclude ceph,smart --anonymize
@@ -275,6 +280,9 @@ while [[ $# -gt 0 ]]; do
       # Selbsttest wird spaeter ausgefuehrt
       RUN_SELFTEST="yes"
       ;;
+    -i|--interactive)
+      INTERACTIVE="yes"
+      ;;
     -v|--version)
       echo "getpvelogs.sh v${VERSION}"
       exit 0
@@ -291,6 +299,362 @@ done
 
 # Variable fuer Selbsttest initialisieren falls nicht gesetzt
 RUN_SELFTEST="${RUN_SELFTEST:-no}"
+INTERACTIVE="${INTERACTIVE:-no}"
+
+# ---------- Interaktive TUI (whiptail) ----------
+
+# Prueft ob whiptail verfuegbar ist
+check_whiptail() {
+  if ! have whiptail; then
+    echo "FEHLER: whiptail ist nicht installiert."
+    echo "Installieren Sie es mit: apt-get install whiptail"
+    echo ""
+    echo "Alternativ koennen Sie das Skript mit Parametern ausfuehren:"
+    echo "  $0 --help"
+    exit 1
+  fi
+}
+
+# Zeigt den Willkommens-Dialog
+show_welcome() {
+  whiptail --title "PVE Support Log Collector v${VERSION}" \
+    --msgbox "Willkommen zum Proxmox VE Support Log Collector!\n\n\
+Dieses Tool sammelt diagnostisch relevante Systeminformationen\n\
+von Proxmox VE Hosts fuer den Support.\n\n\
+Die Ausfuehrung ist read-only (bis auf optionale Tool-Installation).\n\n\
+Druecken Sie OK, um fortzufahren." 16 65
+}
+
+# Modus-Auswahl
+select_mode() {
+  local choice
+  choice=$(whiptail --title "Betriebsmodus waehlen" \
+    --radiolist "Waehlen Sie den Umfang der Datensammlung:\n\n\
+Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 78 3 \
+    "fast" "Schnell: Journal, dmesg, Services, Netzwerk" OFF \
+    "normal" "Standard: + Storage, SMART, Ceph, Cluster [Empfohlen]" ON \
+    "full" "Vollstaendig: + Hardware, VM-Configs, Performance" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  MODE="$choice"
+  return 0
+}
+
+# Tool-Installation Option
+select_tool_install() {
+  local choice
+  choice=$(whiptail --title "Tool-Installation" \
+    --radiolist "Wie sollen fehlende optionale Tools behandelt werden?\n\n\
+Optionale Tools erweitern die Datensammlung (z.B. nvme-cli, ipmitool)." 16 70 3 \
+    "ask" "Nachfragen - Bei fehlenden Tools einzeln fragen" ON \
+    "yes" "Automatisch - Fehlende Tools ohne Nachfrage installieren" OFF \
+    "no" "Nicht installieren - Fehlende Bereiche ueberspringen" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  AUTO_INSTALL_TOOLS="$choice"
+  return 0
+}
+
+# Optionale Features (Checkboxen)
+select_options() {
+  local choices
+  choices=$(whiptail --title "Zusaetzliche Optionen" \
+    --checklist "Waehlen Sie zusaetzliche Optionen:\n\n\
+Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 75 6 \
+    "anonymize" "Anonymisieren - IPs, MACs und Hostnamen ersetzen" OFF \
+    "json-meta" "JSON-Metadaten - Zusaetzliche JSON-Datei erstellen" OFF \
+    "verbose" "Verbose - Detaillierte Ausgabe waehrend Sammlung" OFF \
+    "keep-work" "Arbeitsverzeichnis behalten (nicht loeschen)" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  # Optionen parsen
+  [[ "$choices" == *"anonymize"* ]] && ANONYMIZE="yes"
+  [[ "$choices" == *"json-meta"* ]] && JSON_META="yes"
+  [[ "$choices" == *"verbose"* ]] && VERBOSE="yes"
+  [[ "$choices" == *"keep-work"* ]] && KEEP_WORK="yes"
+  
+  return 0
+}
+
+# Bereiche ausschliessen (optional)
+select_excludes() {
+  # Nur fragen wenn gewuenscht
+  if ! whiptail --title "Bereiche ausschliessen?" \
+    --yesno "Moechten Sie bestimmte Bereiche von der Datensammlung ausschliessen?\n\n\
+Dies ist nuetzlich, wenn Sie z.B. kein Ceph nutzen oder\n\
+SMART-Daten nicht benoetigen." 12 65; then
+    return 0
+  fi
+  
+  local choices
+  choices=$(whiptail --title "Bereiche ausschliessen" \
+    --checklist "Waehlen Sie Bereiche, die NICHT gesammelt werden sollen:\n\n\
+Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 70 6 \
+    "ceph" "Ceph-Cluster Informationen" OFF \
+    "smart" "SMART/NVMe Festplattendaten" OFF \
+    "storage" "Storage-Informationen (LVM, ZFS, MDADM)" OFF \
+    "network" "Erweiterte Netzwerkdaten" OFF \
+    "proxmox" "Proxmox-spezifische Daten" OFF \
+    "hardware" "Hardware-Daten (nur bei --full relevant)" OFF \
+    "firewall" "Firewall-Konfiguration (nur bei --full)" OFF \
+    "performance" "Performance-Daten (nur bei --full)" OFF \
+    3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  # Kommaseparierte Liste erstellen
+  if [[ -n "$choices" ]]; then
+    # Anfuehrungszeichen entfernen und durch Kommas trennen
+    EXCLUDE_SECTIONS=$(echo "$choices" | tr -d '"' | tr ' ' ',')
+  fi
+  
+  return 0
+}
+
+# Ausgabeverzeichnis waehlen (optional)
+select_output_dir() {
+  if ! whiptail --title "Ausgabeverzeichnis" \
+    --yesno "Moechten Sie ein eigenes Ausgabeverzeichnis festlegen?\n\n\
+Standard: Aktuelles Verzeichnis ($(pwd))" 10 65; then
+    return 0
+  fi
+  
+  local dir
+  dir=$(whiptail --title "Ausgabeverzeichnis" \
+    --inputbox "Geben Sie den Pfad zum Ausgabeverzeichnis ein:" 10 65 \
+    "$(pwd)" 3>&1 1>&2 2>&3)
+  
+  local exitstatus=$?
+  if [[ $exitstatus -ne 0 ]]; then
+    return 1
+  fi
+  
+  if [[ -n "$dir" ]]; then
+    OUTPUT_DIR="$dir"
+  fi
+  
+  return 0
+}
+
+# Zusammenfassung und Bestaetigung
+show_summary() {
+  local exclude_text="Keine"
+  [[ -n "$EXCLUDE_SECTIONS" ]] && exclude_text="$EXCLUDE_SECTIONS"
+  
+  local output_text="${OUTPUT_DIR:-$(pwd)}"
+  
+  local options_text=""
+  [[ "$ANONYMIZE" == "yes" ]] && options_text+="Anonymisierung, "
+  [[ "$JSON_META" == "yes" ]] && options_text+="JSON-Meta, "
+  [[ "$VERBOSE" == "yes" ]] && options_text+="Verbose, "
+  [[ "$KEEP_WORK" == "yes" ]] && options_text+="Arbeitsverz. behalten, "
+  [[ -z "$options_text" ]] && options_text="Keine"
+  options_text="${options_text%, }"  # Letztes Komma entfernen
+  
+  local install_text="Nachfragen"
+  [[ "$AUTO_INSTALL_TOOLS" == "yes" ]] && install_text="Automatisch"
+  [[ "$AUTO_INSTALL_TOOLS" == "no" ]] && install_text="Nicht installieren"
+  
+  whiptail --title "Zusammenfassung" \
+    --yesno "Bitte ueberpruefen Sie Ihre Auswahl:\n\n\
+╔══════════════════════════════════════════════════╗\n\
+║  Betriebsmodus:      $MODE\n\
+║  Tool-Installation:  $install_text\n\
+║  Ausgabeverzeichnis: $output_text\n\
+║  Ausgeschlossen:     $exclude_text\n\
+║  Optionen:           $options_text\n\
+╚══════════════════════════════════════════════════╝\n\n\
+Moechten Sie die Datensammlung jetzt starten?" 20 70
+  
+  return $?
+}
+
+# Fortschritts-Dialog (Gauge)
+show_progress() {
+  local percent=$1
+  local message=$2
+  echo -e "XXX\n$percent\n$message\nXXX"
+}
+
+# Schnellstart-Menue
+# Setzt TUI_QUICKSTART="yes" wenn Schnellstart gewaehlt wurde
+# Setzt TUI_CUSTOM="yes" wenn benutzerdefiniert gewaehlt wurde
+# Return 0 = Erfolg, Return 1 = Abgebrochen
+TUI_QUICKSTART="no"
+TUI_CUSTOM="no"
+
+show_quickstart() {
+  TUI_QUICKSTART="no"
+  TUI_CUSTOM="no"
+  
+  local choice
+  choice=$(whiptail --title "PVE Support Log Collector v${VERSION}" \
+    --menu "Willkommen! Waehlen Sie eine Option:" 18 70 5 \
+    "quick-normal" "Schnellstart - Standardmodus (empfohlen)" \
+    "quick-full" "Schnellstart - Vollstaendiger Modus" \
+    "quick-fast" "Schnellstart - Nur essentielle Logs" \
+    "custom" "Benutzerdefiniert - Alle Optionen durchgehen" \
+    "selftest" "Systemtest - Verfuegbare Tools anzeigen" \
+    3>&1 1>&2 2>&3) || {
+      # Benutzer hat Abbrechen gedrueckt
+      return 1
+    }
+  
+  case "$choice" in
+    quick-normal)
+      MODE="normal"
+      AUTO_INSTALL_TOOLS="ask"
+      TUI_QUICKSTART="yes"
+      return 0
+      ;;
+    quick-full)
+      MODE="full"
+      AUTO_INSTALL_TOOLS="ask"
+      TUI_QUICKSTART="yes"
+      return 0
+      ;;
+    quick-fast)
+      MODE="fast"
+      AUTO_INSTALL_TOOLS="no"
+      TUI_QUICKSTART="yes"
+      return 0
+      ;;
+    custom)
+      TUI_CUSTOM="yes"
+      return 0
+      ;;
+    selftest)
+      clear
+      run_selftest
+      echo ""
+      read -rp "Druecken Sie ENTER um fortzufahren..." || true
+      # Rekursiv neu starten
+      show_quickstart
+      return $?
+      ;;
+    *)
+      # Sollte nicht passieren, aber sicherheitshalber
+      return 1
+      ;;
+  esac
+}
+
+# Bestaetigung fuer Schnellstart
+confirm_quickstart() {
+  local mode_desc=""
+  case "$MODE" in
+    fast)   mode_desc="Schnell (nur essentielle Logs)" ;;
+    normal) mode_desc="Standard (empfohlen)" ;;
+    full)   mode_desc="Vollstaendig (inkl. Hardware/Performance)" ;;
+  esac
+  
+  whiptail --title "Schnellstart bestaetigen" \
+    --yesno "Datensammlung starten mit:\n\n\
+  Modus: $mode_desc\n\
+  Ausgabe: $(pwd)\n\
+  Tool-Installation: Bei Bedarf nachfragen\n\n\
+Moechten Sie fortfahren?" 14 60
+  
+  return $?
+}
+
+# Hauptfunktion fuer die TUI
+run_interactive_tui() {
+  check_whiptail
+  
+  # Pruefe root-Rechte vor TUI-Start
+  if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+    whiptail --title "Fehler" \
+      --msgbox "Dieses Skript muss als root ausgefuehrt werden!\n\n\
+Bitte starten Sie es erneut mit:\n\
+  sudo $0 --interactive" 12 55
+    exit 1
+  fi
+  
+  # Schnellstart-Menue anzeigen
+  if ! show_quickstart; then
+    whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+    exit 0
+  fi
+  
+  if [[ "$TUI_QUICKSTART" == "yes" ]]; then
+    # Schnellstart - nur Bestaetigung
+    if ! confirm_quickstart; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+  elif [[ "$TUI_CUSTOM" == "yes" ]]; then
+    # Benutzerdefiniert - alle Dialoge durchlaufen
+    
+    # Willkommen
+    show_welcome
+    
+    # Modus auswaehlen
+    if ! select_mode; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+    
+    # Tool-Installation
+    if ! select_tool_install; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+    
+    # Zusaetzliche Optionen
+    if ! select_options; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+    
+    # Bereiche ausschliessen
+    if ! select_excludes; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+    
+    # Ausgabeverzeichnis
+    if ! select_output_dir; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+    
+    # Zusammenfassung und Bestaetigung
+    if ! show_summary; then
+      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      exit 0
+    fi
+  fi
+  
+  # TUI beenden, normaler Ablauf wird fortgesetzt
+  whiptail --title "Starte Datensammlung" \
+    --infobox "Die Datensammlung wird gestartet...\n\n\
+Die Ausgabe erfolgt nun im Terminal." 8 50
+  
+  sleep 2
+  clear
+  
+  # Zurueck zum normalen Skript-Ablauf
+  return 0
+}
 
 # ---------- Tool-Check-System ----------
 # Prueft alle benoetigten Tools und fragt gesammelt nach Installation
@@ -310,21 +674,23 @@ check_all_tools() {
 install_missing_tools() {
   if ! have apt-get; then
     warn "Kein apt-get verfuegbar - Installation nicht moeglich."
-    return 1
+    return 0  # Kein Fehler, nur Warnung
   fi
   
   log "Aktualisiere Paketlisten..."
-  apt-get update -qq
+  apt-get update -qq || warn "apt-get update fehlgeschlagen"
   
   for pkg in "${!MISSING_TOOLS[@]}"; do
     log "Installiere $pkg..."
     if DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" >/dev/null 2>&1; then
       note_tool_use "$pkg (nachinstalliert)"
-      unset "MISSING_TOOLS[$pkg]"
+      unset "MISSING_TOOLS[$pkg]" || true
     else
       warn "Installation von $pkg fehlgeschlagen."
     fi
   done
+  
+  return 0
 }
 
 prompt_install_tools() {
@@ -339,23 +705,25 @@ prompt_install_tools() {
   
   case "$AUTO_INSTALL_TOOLS" in
     yes)
-      install_missing_tools
+      install_missing_tools || true
       ;;
     no)
-      warn "Tools werden nicht installiert - einige Bereiche werden ausgelassen."
+      log "Tools werden nicht installiert - einige Bereiche werden ausgelassen."
       ;;
     ask)
       read -rp "Moechten Sie die fehlenden Tools installieren? [y/N] " ans || true
       case "$ans" in
         y|Y)
-          install_missing_tools
+          install_missing_tools || true
           ;;
         *)
-          warn "Tools werden nicht installiert - einige Bereiche werden ausgelassen."
+          log "Tools werden nicht installiert - einige Bereiche werden ausgelassen."
           ;;
       esac
       ;;
   esac
+  
+  return 0
 }
 
 # Legacy-Funktion fuer Kompatibilitaet (wird nicht mehr direkt verwendet)
@@ -376,13 +744,81 @@ collect_hardware_extended() {
   
   log_verbose "Sammle erweiterte Hardware-Informationen..."
   
-  # IPMI/BMC
+  # IPMI/BMC - mit schneller Vorab-Pruefung
   if have ipmitool; then
-    note_tool_use "ipmitool"
-    log_verbose "Sammle IPMI-Sensordaten..."
-    run "$OUTDIR/ipmi_sensors.txt" ipmitool sensor list
-    run "$OUTDIR/ipmi_sel.txt" ipmitool sel list
-    run "$OUTDIR/ipmi_fru.txt" ipmitool fru print
+    # Schneller Test ob IPMI ueberhaupt verfuegbar ist (max 5 Sekunden)
+    if timeout 5s ipmitool mc info >/dev/null 2>&1; then
+      note_tool_use "ipmitool"
+      log_verbose "Sammle IPMI-Sensordaten..."
+      
+      # BMC Info sammeln
+      {
+        echo "=== BMC Info ==="
+        timeout 10s ipmitool mc info 2>&1 || echo "(Fehler beim Abrufen)"
+        echo ""
+      } > "$OUTDIR/ipmi_info.txt"
+      
+      # Sensoren (mit Fallback-Nachricht)
+      {
+        echo "=== IPMI Sensors ==="
+        local sensor_output
+        sensor_output=$(timeout 15s ipmitool sensor list 2>&1) || true
+        if [[ -z "$sensor_output" ]]; then
+          echo "(Keine IPMI-Sensoren verfuegbar oder konfiguriert)"
+        elif [[ "$sensor_output" == *"not found"* ]] || [[ "$sensor_output" == *"Unknown"* ]]; then
+          echo "(IPMI-Sensoren nicht lesbar)"
+          echo ""
+          echo "Rohe Ausgabe:"
+          echo "$sensor_output"
+        else
+          echo "$sensor_output"
+        fi
+      } > "$OUTDIR/ipmi_sensors.txt"
+      
+      # System Event Log (mit Fallback-Nachricht)
+      {
+        echo "=== IPMI System Event Log ==="
+        local sel_output
+        sel_output=$(timeout 15s ipmitool sel list 2>&1) || true
+        if [[ -z "$sel_output" ]]; then
+          echo "(System Event Log ist leer)"
+        elif [[ "$sel_output" == *"not found"* ]]; then
+          echo "(Keine SEL-Eintraege vorhanden - System Event Log ist leer)"
+        else
+          echo "$sel_output"
+        fi
+      } > "$OUTDIR/ipmi_sel.txt"
+      
+      # FRU Daten (mit Fallback-Nachricht)
+      {
+        echo "=== IPMI FRU Data ==="
+        local fru_output
+        fru_output=$(timeout 15s ipmitool fru print 2>&1) || true
+        if [[ -z "$fru_output" ]]; then
+          echo "(Keine FRU-Daten verfuegbar)"
+        elif [[ "$fru_output" == *"Unknown FRU"* ]] || [[ "$fru_output" == *"not found"* ]]; then
+          echo "(FRU-Daten nicht konfiguriert oder nicht lesbar)"
+          echo ""
+          echo "Rohe Ausgabe:"
+          echo "$fru_output"
+        else
+          echo "$fru_output"
+        fi
+      } > "$OUTDIR/ipmi_fru.txt"
+      
+    else
+      log_verbose "IPMI/BMC nicht erreichbar - IPMI-Daten werden ausgelassen."
+      {
+        echo "=== IPMI Status ==="
+        echo "IPMI/BMC nicht erreichbar oder nicht vorhanden."
+        echo ""
+        echo "Moegliche Ursachen:"
+        echo "  - System ist eine virtuelle Maschine"
+        echo "  - Kein BMC/IPMI-Controller vorhanden"
+        echo "  - IPMI-Treiber nicht geladen (ipmi_devintf, ipmi_si)"
+        echo "  - BMC nicht konfiguriert"
+      } > "$OUTDIR/ipmi_info.txt"
+    fi
   else
     log_verbose "ipmitool nicht verfuegbar - IPMI-Daten werden ausgelassen."
   fi
@@ -395,6 +831,8 @@ collect_hardware_extended() {
   else
     log_verbose "lm-sensors nicht verfuegbar - Thermal-Daten werden ausgelassen."
   fi
+  
+  return 0
 }
 
 # Proxmox-Datensammler: VM/CT-Configs, Backup, HA, Replication, etc. (nur --full)
@@ -473,6 +911,8 @@ collect_pve_extended() {
     note_tool_use "proxmox-backup-client"
     run_quick "$OUTDIR/pbs_status.txt" proxmox-backup-client version
   fi
+  
+  return 0
 }
 
 # Firewall-Datensammler (nur --full)
@@ -522,6 +962,8 @@ collect_firewall() {
   
   # SSH Config (ohne private Keys!)
   [[ -f /etc/ssh/sshd_config ]] && cp /etc/ssh/sshd_config "$OUTDIR/sshd_config.txt" 2>/dev/null || true
+  
+  return 0
 }
 
 # Performance-Datensammler (nur --full)
@@ -560,6 +1002,8 @@ collect_performance() {
     run "$OUTDIR/sar_cpu.txt" sar -u 1 5
     run "$OUTDIR/sar_disk.txt" sar -d 1 5
   fi
+  
+  return 0
 }
 
 # System-Erweiterungen (nur --full)
@@ -586,6 +1030,8 @@ collect_system_extended() {
     echo "=== Systemd Timers ==="
     systemctl list-timers --all --no-pager 2>/dev/null || echo "(nicht verfuegbar)"
   } >> "$OUTDIR/systemd_timers.txt" 2>&1
+  
+  return 0
 }
 
 # ---------- Anonymisierung ----------
@@ -637,6 +1083,7 @@ anonymize_output() {
   } >> "$OUTDIR/_meta.txt"
   
   log "Anonymisierung abgeschlossen."
+  return 0
 }
 
 # ---------- Selbsttest ----------
@@ -731,6 +1178,11 @@ run_selftest() {
 if [[ "$RUN_SELFTEST" == "yes" ]]; then
   run_selftest
   exit 0
+fi
+
+# Interaktiver TUI-Modus
+if [[ "$INTERACTIVE" == "yes" ]]; then
+  run_interactive_tui
 fi
 
 require_root
@@ -1119,18 +1571,18 @@ done
 # ---------- Erweiterte Datensammlung (nur --full Modus) ----------
 if is_mode_full; then
   log "Sammle erweiterte Daten (--full Modus)..."
-  collect_hardware_extended
-  collect_pve_extended
-  collect_firewall
-  collect_performance
-  collect_system_extended
+  collect_hardware_extended || true
+  collect_pve_extended || true
+  collect_firewall || true
+  collect_performance || true
+  collect_system_extended || true
 fi
 
 # ---------- JSON-Metadaten ----------
-write_json_meta
+write_json_meta || true
 
 # ---------- Anonymisierung (VOR dem Archivieren) ----------
-anonymize_output
+anonymize_output || true
 
 # ---------- Pack ----------
 log "Packe Archiv..."

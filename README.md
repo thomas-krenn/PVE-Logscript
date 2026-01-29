@@ -18,6 +18,7 @@ Die Ausführung erfolgt **read-only**, mit Ausnahme der **optionalen Installatio
 
 ## Neuerungen in Version 4.0
 
+* **Interaktive TUI:** Neuer geführter Modus mit `--interactive` (whiptail-basiert)
 * **Drei Betriebsmodi:** `--fast`, `--normal` (Standard), `--full`
 * **Automatische Tool-Erkennung:** Alle benötigten Tools werden vor der Sammlung geprüft und bei Bedarf gesammelt nachinstalliert
 * **Anonymisierung:** Mit `--anonymize` werden IPs, MACs und Hostnamen automatisch ersetzt
@@ -66,9 +67,53 @@ curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpv
 
 ---
 
+## Interaktive TUI
+
+Mit dem Parameter `--interactive` (oder `-i`) startet das Skript eine benutzerfreundliche Text-Oberfläche (TUI), die Sie durch alle Optionen führt.
+
+### Schnellstart-Menü
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ PVE Support Log Collector v4.0.0                                 │
+├──────────────────────────────────────────────────────────────────┤
+│ ○ Schnellstart - Standardmodus (empfohlen)                       │
+│ ○ Schnellstart - Vollständiger Modus                             │
+│ ○ Schnellstart - Nur essentielle Logs                            │
+│ ○ Benutzerdefiniert - Alle Optionen durchgehen                   │
+│ ○ Systemtest - Verfügbare Tools anzeigen                         │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### Benutzerdefinierter Modus
+
+Im benutzerdefinierten Modus werden Sie durch folgende Dialoge geführt:
+
+1. **Betriebsmodus** - Wahl zwischen fast/normal/full
+2. **Tool-Installation** - Verhalten bei fehlenden Tools
+3. **Zusätzliche Optionen** - Anonymisierung, JSON-Meta, Verbose, etc.
+4. **Bereiche ausschließen** - Optional Ceph, SMART, etc. überspringen
+5. **Ausgabeverzeichnis** - Optional eigenen Pfad wählen
+6. **Zusammenfassung** - Bestätigung vor dem Start
+
+### TUI starten
+
+```bash
+sudo ./getpvelogs.sh --interactive
+# oder kurz:
+sudo ./getpvelogs.sh -i
+```
+
+> **Hinweis:** Die TUI benötigt `whiptail`, das auf den meisten Debian/Ubuntu-Systemen vorinstalliert ist.
+
+---
+
 ## Beispiele
 
 ```bash
+# Interaktiver Modus mit geführter TUI (empfohlen für Einsteiger)
+sudo ./getpvelogs.sh --interactive
+
 # Standard-Ausführung (normal Modus) mit interaktiver Abfrage
 sudo ./getpvelogs.sh
 
@@ -97,6 +142,12 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 ---
 
 ## Parameter
+
+### Interaktiver Modus
+
+| Parameter | Beschreibung |
+|-----------|--------------|
+| `-i`, `--interactive` | Startet die interaktive TUI (whiptail) mit geführter Konfiguration |
 
 ### Betriebsmodi
 
