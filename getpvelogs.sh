@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Version: 4.0.1 - 01/2026
+# Version: 4.0.2 - 01/2026
 # Thomas-Krenn.AG - Proxmox VE Support Log Collector
 # Autor: Samuel Mueller
 # Kontakt: smueller@thomas-krenn.com
@@ -53,7 +53,7 @@ shopt -s nullglob
 shopt -s lastpipe
 
 # ---------- Konstanten ----------
-readonly VERSION="4.0.1"
+readonly VERSION="4.0.2"
 readonly MIN_DISK_SPACE_MB=500
 readonly CMD_TIMEOUT=60
 
