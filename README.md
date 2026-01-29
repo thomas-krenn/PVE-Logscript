@@ -36,7 +36,7 @@ Die Ausführung erfolgt **read-only**, mit Ausnahme der **optionalen Installatio
 ### 1. Repository klonen
 
 ```bash
-git clone https://github.com/thomas-krenn/PVE-Logscript.git
+git clone -b tui https://github.com/thomas-krenn/PVE-Logscript.git
 ```
 
 ### 2. In das Verzeichnis wechseln
@@ -62,7 +62,7 @@ sudo ./getpvelogs.sh
 Falls das Skript nur einmalig benötigt wird:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpvelogs.sh | sudo bash
+curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/tui/getpvelogs.sh | sudo bash -s -- -i
 ```
 
 ---
