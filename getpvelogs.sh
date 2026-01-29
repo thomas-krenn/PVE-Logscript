@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Version: 4.0.0 - 01/2026
+# Version: 4.0.1 - 01/2026
 # Thomas-Krenn.AG - Proxmox VE Support Log Collector
 # Autor: Samuel Mueller
 # Kontakt: smueller@thomas-krenn.com
@@ -53,7 +53,7 @@ shopt -s nullglob
 shopt -s lastpipe
 
 # ---------- Konstanten ----------
-readonly VERSION="4.0.0"
+readonly VERSION="4.0.1"
 readonly MIN_DISK_SPACE_MB=500
 readonly CMD_TIMEOUT=60
 
@@ -384,9 +384,9 @@ collect_hardware_extended() {
   if have ipmitool; then
     note_tool_use "ipmitool"
     log "  - IPMI-Sensordaten..."
-    run "$OUTDIR/ipmi_sensors.txt" ipmitool sensor list
-    run "$OUTDIR/ipmi_sel.txt" ipmitool sel list
-    run "$OUTDIR/ipmi_fru.txt" ipmitool fru print
+    run "$OUTDIR/hardware/ipmi_sensors.txt" ipmitool sensor list
+    run "$OUTDIR/hardware/ipmi_sel.txt" ipmitool sel list
+    run "$OUTDIR/hardware/ipmi_fru.txt" ipmitool fru print
   else
     log "  - IPMI: ipmitool nicht verfuegbar (uebersprungen)"
   fi
@@ -395,7 +395,7 @@ collect_hardware_extended() {
   if have sensors; then
     note_tool_use "lm-sensors"
     log "  - Thermal-Daten (lm-sensors)..."
-    run_quick "$OUTDIR/sensors.txt" sensors -A
+    run_quick "$OUTDIR/hardware/sensors.txt" sensors -A
   else
     log "  - Thermal: lm-sensors nicht verfuegbar (uebersprungen)"
   fi
@@ -414,9 +414,9 @@ collect_pve_extended() {
     local vm_count
     vm_count=$(find /etc/pve/qemu-server -maxdepth 1 -name "*.conf" 2>/dev/null | wc -l)
     if [[ "$vm_count" -gt 0 ]]; then
-      mkdir -p "$OUTDIR/vm-configs"
+      mkdir -p "$OUTDIR/proxmox/vm-configs"
       for conf in /etc/pve/qemu-server/*.conf; do
-        [[ -f "$conf" ]] && cp "$conf" "$OUTDIR/vm-configs/" 2>/dev/null || true
+        [[ -f "$conf" ]] && cp "$conf" "$OUTDIR/proxmox/vm-configs/" 2>/dev/null || true
       done
       log "  - VM-Konfigurationen: $vm_count VMs kopiert"
     else
@@ -429,9 +429,9 @@ collect_pve_extended() {
     local ct_count
     ct_count=$(find /etc/pve/lxc -maxdepth 1 -name "*.conf" 2>/dev/null | wc -l)
     if [[ "$ct_count" -gt 0 ]]; then
-      mkdir -p "$OUTDIR/ct-configs"
+      mkdir -p "$OUTDIR/proxmox/ct-configs"
       for conf in /etc/pve/lxc/*.conf; do
-        [[ -f "$conf" ]] && cp "$conf" "$OUTDIR/ct-configs/" 2>/dev/null || true
+        [[ -f "$conf" ]] && cp "$conf" "$OUTDIR/proxmox/ct-configs/" 2>/dev/null || true
       done
       log "  - CT-Konfigurationen: $ct_count Container kopiert"
     else
@@ -450,16 +450,16 @@ collect_pve_extended() {
     echo ""
     echo "=== Backup Jobs (jobs.cfg) ==="
     cat /etc/pve/jobs.cfg 2>/dev/null || echo "(nicht vorhanden)"
-  } >> "$OUTDIR/backup_config.txt" 2>&1
+  } >> "$OUTDIR/proxmox/backup_config.txt" 2>&1
   
   # HA-Manager
   if have ha-manager; then
     log "  - HA-Manager Status..."
-    run_quick "$OUTDIR/ha_status.txt" ha-manager status
+    run_quick "$OUTDIR/proxmox/ha_status.txt" ha-manager status
     
     if [[ -d /etc/pve/ha ]]; then
-      mkdir -p "$OUTDIR/ha-config"
-      cp -r /etc/pve/ha/* "$OUTDIR/ha-config/" 2>/dev/null || true
+      mkdir -p "$OUTDIR/proxmox/ha-config"
+      cp -r /etc/pve/ha/* "$OUTDIR/proxmox/ha-config/" 2>/dev/null || true
     fi
   else
     log "  - HA-Manager: nicht verfuegbar (uebersprungen)"
@@ -468,8 +468,8 @@ collect_pve_extended() {
   # Replication
   if have pvesr; then
     log "  - Replication-Status..."
-    run_quick "$OUTDIR/replication_status.txt" pvesr status
-    [[ -f /etc/pve/replication.cfg ]] && cp /etc/pve/replication.cfg "$OUTDIR/" 2>/dev/null || true
+    run_quick "$OUTDIR/proxmox/replication_status.txt" pvesr status
+    [[ -f /etc/pve/replication.cfg ]] && cp /etc/pve/replication.cfg "$OUTDIR/proxmox/" 2>/dev/null || true
   else
     log "  - Replication: pvesr nicht verfuegbar (uebersprungen)"
   fi
@@ -479,13 +479,13 @@ collect_pve_extended() {
   {
     echo "=== Subscription Status ==="
     pvesubscription get 2>/dev/null || echo "(nicht verfuegbar)"
-  } >> "$OUTDIR/subscription.txt" 2>&1
+  } >> "$OUTDIR/proxmox/subscription.txt" 2>&1
   
   # SDN (Software Defined Networking)
   if [[ -d /etc/pve/sdn ]]; then
     log "  - SDN-Konfiguration..."
-    mkdir -p "$OUTDIR/sdn-config"
-    cp -r /etc/pve/sdn/* "$OUTDIR/sdn-config/" 2>/dev/null || true
+    mkdir -p "$OUTDIR/proxmox/sdn-config"
+    cp -r /etc/pve/sdn/* "$OUTDIR/proxmox/sdn-config/" 2>/dev/null || true
   else
     log "  - SDN: nicht konfiguriert (uebersprungen)"
   fi
@@ -494,7 +494,7 @@ collect_pve_extended() {
   if have proxmox-backup-client; then
     log "  - PBS-Client Status..."
     note_tool_use "proxmox-backup-client"
-    run_quick "$OUTDIR/pbs_status.txt" proxmox-backup-client version
+    run_quick "$OUTDIR/proxmox/pbs_status.txt" proxmox-backup-client version
   fi
 }
 
@@ -508,26 +508,26 @@ collect_firewall() {
   # PVE Firewall Status
   if have pve-firewall; then
     log "  - PVE Firewall-Status..."
-    run_quick "$OUTDIR/firewall_status.txt" pve-firewall status
+    run_quick "$OUTDIR/security/firewall_status.txt" pve-firewall status
   else
     log "  - PVE Firewall: nicht verfuegbar (uebersprungen)"
   fi
   
   # Firewall-Configs kopieren
   log "  - Firewall-Konfigurationen..."
-  mkdir -p "$OUTDIR/firewall"
+  mkdir -p "$OUTDIR/security/firewall"
   
   # Cluster Firewall
-  [[ -f /etc/pve/firewall/cluster.fw ]] && cp /etc/pve/firewall/cluster.fw "$OUTDIR/firewall/" 2>/dev/null || true
+  [[ -f /etc/pve/firewall/cluster.fw ]] && cp /etc/pve/firewall/cluster.fw "$OUTDIR/security/firewall/" 2>/dev/null || true
   
   # Host Firewall
   for fw in /etc/pve/nodes/*/host.fw; do
-    [[ -f "$fw" ]] && cp "$fw" "$OUTDIR/firewall/$(basename "$(dirname "$fw")")_host.fw" 2>/dev/null || true
+    [[ -f "$fw" ]] && cp "$fw" "$OUTDIR/security/firewall/$(basename "$(dirname "$fw")")_host.fw" 2>/dev/null || true
   done
   
   # VM/CT Firewall
   for fw in /etc/pve/firewall/*.fw; do
-    [[ -f "$fw" ]] && cp "$fw" "$OUTDIR/firewall/" 2>/dev/null || true
+    [[ -f "$fw" ]] && cp "$fw" "$OUTDIR/security/firewall/" 2>/dev/null || true
   done
   
   # SSL-Zertifikat Info
@@ -546,11 +546,11 @@ collect_firewall() {
     else
       echo "(nicht vorhanden)"
     fi
-  } >> "$OUTDIR/ssl_info.txt" 2>&1
+  } >> "$OUTDIR/security/ssl_info.txt" 2>&1
   
   # SSH Config (ohne private Keys!)
   log "  - SSH-Konfiguration..."
-  [[ -f /etc/ssh/sshd_config ]] && cp /etc/ssh/sshd_config "$OUTDIR/sshd_config.txt" 2>/dev/null || true
+  [[ -f /etc/ssh/sshd_config ]] && cp /etc/ssh/sshd_config "$OUTDIR/security/sshd_config.txt" 2>/dev/null || true
 }
 
 # Performance-Datensammler (nur --full)
@@ -568,13 +568,13 @@ collect_performance() {
     echo ""
     echo "=== Top 20 by CPU ==="
     ps aux --sort=-%cpu 2>/dev/null | head -21
-  } >> "$OUTDIR/top_processes.txt" 2>&1
+  } >> "$OUTDIR/performance/top_processes.txt" 2>&1
   
   # iostat
   if have iostat; then
     note_tool_use "sysstat (iostat)"
     log "  - I/O-Statistiken (iostat)..."
-    run_quick "$OUTDIR/iostat.txt" iostat -xz 1 3
+    run_quick "$OUTDIR/performance/iostat.txt" iostat -xz 1 3
   else
     log "  - iostat: nicht verfuegbar (uebersprungen)"
   fi
@@ -582,7 +582,7 @@ collect_performance() {
   # vmstat
   if have vmstat; then
     log "  - VM-Statistiken (vmstat)..."
-    run_quick "$OUTDIR/vmstat.txt" vmstat 1 5
+    run_quick "$OUTDIR/performance/vmstat.txt" vmstat 1 5
   else
     log "  - vmstat: nicht verfuegbar (uebersprungen)"
   fi
@@ -591,8 +591,8 @@ collect_performance() {
   if have sar; then
     note_tool_use "sysstat (sar)"
     log "  - System Activity Reports (sar)..."
-    run "$OUTDIR/sar_cpu.txt" sar -u 1 5
-    run "$OUTDIR/sar_disk.txt" sar -d 1 5
+    run "$OUTDIR/performance/sar_cpu.txt" sar -u 1 5
+    run "$OUTDIR/performance/sar_disk.txt" sar -d 1 5
   else
     log "  - sar: nicht verfuegbar (uebersprungen)"
   fi
@@ -616,14 +616,14 @@ collect_system_extended() {
     echo ""
     echo "=== Kernel Modules ==="
     lsmod 2>/dev/null || echo "(nicht verfuegbar)"
-  } >> "$OUTDIR/boot_config.txt" 2>&1
+  } >> "$OUTDIR/system/boot_config.txt" 2>&1
   
   # Systemd Timer
   log "  - Systemd-Timer..."
   {
     echo "=== Systemd Timers ==="
     systemctl list-timers --all --no-pager 2>/dev/null || echo "(nicht verfuegbar)"
-  } >> "$OUTDIR/systemd_timers.txt" 2>&1
+  } >> "$OUTDIR/system/systemd_timers.txt" 2>&1
 }
 
 # ---------- Anonymisierung ----------
@@ -824,7 +824,15 @@ touch "$TOOLS_USED_FILE" "$ERRORS_FILE"
 
 log "Arbeitsverzeichnis: $OUTDIR"
 
-mkdir -p "$OUTDIR/logs" "$OUTDIR/net-if" "$OUTDIR/ceph"
+# Ordnerstruktur erstellen
+mkdir -p "$OUTDIR/logs"
+mkdir -p "$OUTDIR/system"
+mkdir -p "$OUTDIR/network/net-if"
+mkdir -p "$OUTDIR/proxmox"
+mkdir -p "$OUTDIR/security"
+mkdir -p "$OUTDIR/hardware"
+mkdir -p "$OUTDIR/performance"
+mkdir -p "$OUTDIR/ceph"
 
 # Archivnamen (im gleichen Verzeichnis wie OUTDIR)
 ARCHIVE_ZST="${TARGET_DIR}/${HOST}_${SN}_${TS}.supportlogs.tar.zst"
@@ -886,7 +894,7 @@ log "Sammle Basisinformationen..."
   echo ""
   echo "=== DMI Info ==="
   dmidecode -t system -t baseboard 2>/dev/null || true
-} >> "$OUTDIR/hw.txt" 2>&1
+} >> "$OUTDIR/system/hw.txt" 2>&1
 
 run_quick "$OUTDIR/kernel_dmesg.txt" dmesg
 
@@ -895,7 +903,7 @@ run_quick "$OUTDIR/kernel_dmesg.txt" dmesg
   for f in /var/log/apt/history.log*; do
     [[ -f "$f" ]] && cat "$f" 2>/dev/null
   done
-} >> "$OUTDIR/apt_history.txt" 2>&1
+} >> "$OUTDIR/system/apt_history.txt" 2>&1
 
 # ---------- Journal / Syslog ----------
 log "Sammle Journald/Syslog..."
@@ -905,7 +913,7 @@ if have journalctl; then
 else
   {
     cat /var/log/syslog* 2>/dev/null || cat /var/log/messages* 2>/dev/null || true
-  } >> "$OUTDIR/syslog.txt" 2>&1
+  } >> "$OUTDIR/system/syslog.txt" 2>&1
 fi
 
 # ---------- Netzwerk ----------
@@ -924,7 +932,7 @@ log "Sammle Netzwerkdaten..."
   elif have netstat; then
     netstat -tulpn
   fi
-} >> "$OUTDIR/network.txt" 2>&1
+} >> "$OUTDIR/network/network.txt" 2>&1
 
 # Interface-Details
 for IF in /sys/class/net/*; do
@@ -936,7 +944,7 @@ for IF in /sys/class/net/*; do
       ethtool "$IF" 2>/dev/null || true
       ethtool -S "$IF" 2>/dev/null || true
     fi
-  } >> "$OUTDIR/net-if/${IF}.txt"
+  } >> "$OUTDIR/network/net-if/${IF}.txt"
 done
 
 # Netzwerk-Konfiguration
@@ -953,7 +961,7 @@ done
       echo ""
     fi
   done
-} >> "$OUTDIR/network_config.txt" 2>&1
+} >> "$OUTDIR/network/network_config.txt" 2>&1
 
 # ---------- Storage ----------
 # Storage-Informationen nur bei normal/full Modus
@@ -971,7 +979,7 @@ if is_mode_normal_or_full && ! is_excluded "storage"; then
         mdadm --detail "$a" 2>/dev/null || true
       fi
     done
-  } >> "$OUTDIR/mdadm.txt" 2>&1
+  } >> "$OUTDIR/system/mdadm.txt" 2>&1
 
   # LVM
   {
@@ -983,7 +991,7 @@ if is_mode_normal_or_full && ! is_excluded "storage"; then
     echo ""
     echo "=== Logical Volumes ==="
     lvs -a 2>/dev/null || true
-  } >> "$OUTDIR/lvm.txt" 2>&1
+  } >> "$OUTDIR/system/lvm.txt" 2>&1
 
   # ZFS
   if have zpool; then
@@ -1008,7 +1016,7 @@ if have pveversion && ! is_excluded "proxmox"; then
   note_tool_use "Proxmox VE"
 
   run_quick "$OUTDIR/pveversion.txt" pveversion -v
-  have pvereport && run "$OUTDIR/pvereport.txt" pvereport
+  have pvereport && run "$OUTDIR/proxmox/pvereport.txt" pvereport
 
   # Services
   {
@@ -1021,7 +1029,7 @@ if have pveversion && ! is_excluded "proxmox"; then
       systemctl status --no-pager "$svc" 2>/dev/null || true
       echo ""
     done
-  } >> "$OUTDIR/pve_services.txt" 2>&1
+  } >> "$OUTDIR/proxmox/pve_services.txt" 2>&1
 
   # VMs und Container (nur bei normal/full)
   if is_mode_normal_or_full; then
@@ -1035,7 +1043,7 @@ if have pveversion && ! is_excluded "proxmox"; then
         echo "=== LXC Containers ==="
         pct list 2>/dev/null || true
       fi
-    } >> "$OUTDIR/pve_vms.txt" 2>&1
+    } >> "$OUTDIR/proxmox/pve_vms.txt" 2>&1
 
     # Storage
     if have pvesm; then
@@ -1067,7 +1075,7 @@ if have pveversion && ! is_excluded "proxmox"; then
         echo "=== Corosync Ring Status ==="
         corosync-cfgtool -s 2>/dev/null || true
       fi
-    } >> "$OUTDIR/cluster.txt" 2>&1
+    } >> "$OUTDIR/proxmox/cluster.txt" 2>&1
   fi
 fi
 

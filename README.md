@@ -1,6 +1,6 @@
 # Proxmox VE Support Log Collector
 
-**Version:** 4.0.0 — 01/2026
+**Version:** 4.0.1 — 01/2026
 
 **Autor:** Samuel Müller
 
@@ -167,47 +167,73 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 ## Ausgabestruktur
 
-### Standard-Ausgabe
-
 ```text
 <hostname>_<serial>_<timestamp>.logs-XXXX/
+│
 ├── _meta.txt                 Metadaten und Systemübersicht
 ├── _meta.json                JSON-Metadaten (bei --json-meta)
 ├── _tools_used.txt           Liste verwendeter Tools
 ├── _errors.txt               Warnungen und Fehler
-├── hw.txt                    Hardware-Informationen
+│
 ├── kernel_dmesg.txt          Kernel-Meldungen
 ├── journal_*.txt             Journald-Logs
-├── network.txt               Netzwerk-Status
-├── network_config.txt        Netzwerk-Konfiguration
-├── logs/                     System- und PVE-Logs
-├── net-if/                   Interface-Statistiken
-└── ceph/                     Ceph-Daten (falls vorhanden)
-```
-
-### Zusätzlich im Full-Modus
-
-```text
-├── ipmi_sensors.txt          IPMI Sensor-Werte
-├── ipmi_sel.txt              IPMI System Event Log
-├── sensors.txt               Thermal-Daten
-├── backup_config.txt         Backup-Konfiguration
-├── ha_status.txt             HA-Manager Status
-├── replication_status.txt    Replication-Status
-├── subscription.txt          Subscription-Status
-├── firewall_status.txt       Firewall-Status
-├── ssl_info.txt              SSL-Zertifikat-Info
-├── sshd_config.txt           SSH-Konfiguration
-├── top_processes.txt         Top-Prozesse
-├── iostat.txt                I/O-Statistiken
-├── vmstat.txt                VM-Statistiken
-├── boot_config.txt           Boot-Konfiguration
-├── systemd_timers.txt        Systemd-Timer
-├── vm-configs/               VM-Konfigurationsdateien
-├── ct-configs/               CT-Konfigurationsdateien
-├── ha-config/                HA-Konfiguration
-├── sdn-config/               SDN-Konfiguration
-└── firewall/                 Firewall-Regeln
+├── smart.txt                 SMART-Daten
+├── nvme_list.txt             NVMe-Geräteliste
+├── zfs.txt                   ZFS-Status
+├── storage.txt               Storage-Übersicht
+│
+├── system/                   System-Informationen
+│   ├── hw.txt                Hardware-Details
+│   ├── apt_history.txt       Paket-Historie
+│   ├── lvm.txt               LVM-Konfiguration
+│   ├── mdadm.txt             RAID-Status
+│   ├── syslog.txt            Syslog (falls kein journald)
+│   ├── boot_config.txt       Boot/GRUB-Konfiguration (--full)
+│   └── systemd_timers.txt    Systemd-Timer (--full)
+│
+├── network/                  Netzwerk
+│   ├── network.txt           Netzwerk-Status
+│   ├── network_config.txt    Netzwerk-Konfiguration
+│   └── net-if/               Interface-Statistiken
+│
+├── proxmox/                  Proxmox VE
+│   ├── pveversion.txt        PVE-Version
+│   ├── pve_services.txt      PVE-Services
+│   ├── pve_vms.txt           VM/CT-Liste
+│   ├── pvereport.txt         PVE-Report
+│   ├── cluster.txt           Cluster-Status
+│   ├── subscription.txt      Subscription-Status (--full)
+│   ├── backup_config.txt     Backup-Konfiguration (--full)
+│   ├── ha_status.txt         HA-Manager Status (--full)
+│   ├── replication_status.txt Replication-Status (--full)
+│   ├── pbs_status.txt        PBS-Client Status (--full)
+│   ├── vm-configs/           VM-Konfigurationen (--full)
+│   ├── ct-configs/           CT-Konfigurationen (--full)
+│   ├── ha-config/            HA-Konfiguration (--full)
+│   └── sdn-config/           SDN-Konfiguration (--full)
+│
+├── security/                 Sicherheit (--full)
+│   ├── firewall_status.txt   Firewall-Status
+│   ├── firewall/             Firewall-Regeln
+│   ├── ssl_info.txt          SSL-Zertifikat-Info
+│   └── sshd_config.txt       SSH-Konfiguration
+│
+├── hardware/                 Hardware-Details (--full)
+│   ├── ipmi_sensors.txt      IPMI Sensor-Werte
+│   ├── ipmi_sel.txt          IPMI System Event Log
+│   ├── ipmi_fru.txt          IPMI FRU-Daten
+│   └── sensors.txt           Thermal-Daten (lm-sensors)
+│
+├── performance/              Performance-Daten (--full)
+│   ├── top_processes.txt     Top-Prozesse (CPU/Memory)
+│   ├── iostat.txt            I/O-Statistiken
+│   ├── vmstat.txt            VM-Statistiken
+│   ├── sar_cpu.txt           SAR CPU-Daten
+│   └── sar_disk.txt          SAR Disk-Daten
+│
+├── ceph/                     Ceph-Daten (falls vorhanden)
+│
+└── logs/                     System- und PVE-Logs
 ```
 
 ---
