@@ -120,17 +120,20 @@ log_verbose() {
 # Prueft ob ein Bereich ausgeschlossen ist
 is_excluded() {
   local section="$1"
-  [[ -n "$EXCLUDE_SECTIONS" && "$EXCLUDE_SECTIONS" == *"$section"* ]]
+  [[ -n "$EXCLUDE_SECTIONS" && "$EXCLUDE_SECTIONS" == *"$section"* ]] && return 0
+  return 1
 }
 
 # Prueft ob Modus mindestens 'normal' ist (normal oder full)
 is_mode_normal_or_full() {
-  [[ "$MODE" == "normal" || "$MODE" == "full" ]]
+  [[ "$MODE" == "normal" || "$MODE" == "full" ]] && return 0
+  return 1
 }
 
 # Prueft ob Modus 'full' ist
 is_mode_full() {
-  [[ "$MODE" == "full" ]]
+  [[ "$MODE" == "full" ]] && return 0
+  return 1
 }
 
 # Generiert Checksummen fuer das Archiv
