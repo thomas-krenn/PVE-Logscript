@@ -1039,14 +1039,16 @@ anonymize_output() {
     if file -b "$file" 2>/dev/null | grep -q "text"; then
       log_verbose "Anonymisiere: $(basename "$file")"
       
-      # IPv4-Adressen ersetzen (aber nicht 127.0.0.1 und 0.0.0.0)
+      # IPv4-Adressen ersetzen (erstes und letztes Oktett bleiben sichtbar)
+      # Beispiel: 192.168.1.100 -> 192.X.X.100
       sed -i \
-        -e 's/\b\([0-9]\{1,3\}\)\.\([0-9]\{1,3\}\)\.\([0-9]\{1,3\}\)\.\([0-9]\{1,3\}\)\b/X.X.X.X/g' \
+        -e 's/\b\([0-9]\{1,3\}\)\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.\([0-9]\{1,3\}\)\b/\1.X.X.\2/g' \
         "$file" 2>/dev/null || true
       
-      # MAC-Adressen ersetzen (Format: XX:XX:XX:XX:XX:XX)
+      # MAC-Adressen ersetzen (letzte 3 Bloecke bleiben sichtbar)
+      # Beispiel: AA:BB:CC:DD:EE:FF -> XX:XX:XX:DD:EE:FF
       sed -i \
-        -e 's/\b[0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}\b/XX:XX:XX:XX:XX:XX/g' \
+        -e 's/\b[0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}:\([0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}\)\b/XX:XX:XX:\1/g' \
         "$file" 2>/dev/null || true
       
       # Hostname ersetzen (nur wenn nicht leer)
@@ -1064,8 +1066,8 @@ anonymize_output() {
     echo "========================================"
     echo "  HINWEIS: Daten wurden anonymisiert"
     echo "========================================"
-    echo "IP-Adressen: ersetzt durch X.X.X.X"
-    echo "MAC-Adressen: ersetzt durch XX:XX:XX:XX:XX:XX"
+    echo "IP-Adressen: teilweise maskiert (erstes.X.X.letztes Oktett)"
+    echo "MAC-Adressen: teilweise maskiert (XX:XX:XX:letzte:drei:bloecke)"
     echo "Hostname: ersetzt durch HOSTNAME"
   } >> "$OUTDIR/_meta.txt"
   
