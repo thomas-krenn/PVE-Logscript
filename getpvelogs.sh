@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Version: 4.0.2 - 01/2026
+# Version: 4.0.3 - 01/2026
 # Thomas-Krenn.AG - Proxmox VE Support Log Collector
 # Autor: Samuel Mueller
 # Kontakt: smueller@thomas-krenn.com
@@ -12,7 +12,7 @@
 #   abgesehen von der optionalen Installation von Tools wie nvme-cli, ipmitool, etc.
 #
 # Funktionsumfang:
-#   - Zwei Betriebsmodi: --normal (Default), --full
+#   - Zwei Betriebsmodi: Default, --full
 #   - Fortschritt-Ausgabe auf STDOUT (Sammle / Kopiere / Packe)
 #   - Erfassung von Kernel-, Journal-, System-, Storage- und Netzwerkdaten
 #   - Aggregation von Proxmox-Service- sowie VM/CT-Informationen
@@ -28,10 +28,10 @@
 #   - Checksummen-Generierung (SHA256/MD5)
 #
 # Betriebsmodi:
-#   --normal  Standard-Umfang: Journal, dmesg, PVE-Services, Netzwerk,
-#             Storage, SMART, Ceph, Cluster, VM/CT-Listen (Default)
-#   --full    Normal + Hardware (IPMI, Thermal), VM/CT-Configs, Firewall,
-#             Performance, Backup/HA/Replication
+#   Default   Standard-Umfang: Journal, dmesg, PVE-Services, Netzwerk,
+#             Storage, SMART, Ceph, Cluster, VM/CT-Listen (ohne Flag)
+#   --full    Vollstaendig: Default + Hardware (IPMI, Thermal), VM/CT-Configs,
+#             Firewall, Performance, Backup/HA/Replication
 #
 # Datenschutz / DSGVO-Hinweis:
 #   Dieses Skript kann Hostnamen, Benutzernamen, VM-Namen und IP-Adressen auslesen.
@@ -53,7 +53,7 @@ shopt -s nullglob
 shopt -s lastpipe
 
 # ---------- Konstanten ----------
-readonly VERSION="4.0.2"
+readonly VERSION="4.0.3"
 readonly MIN_DISK_SPACE_MB=500
 readonly CMD_TIMEOUT=60
 
@@ -212,7 +212,7 @@ Proxmox VE Support Log Collector v${VERSION}
 Sammelt diagnostisch relevante Systeminformationen von Proxmox VE Hosts.
 
 Betriebsmodi:
-  --normal            Standard-Umfang (Default)
+  Default             Standard-Umfang (ohne Flag)
   --full              Vollstaendige Datensammlung inkl. Hardware
 
 Tool-Installation:
@@ -234,8 +234,8 @@ Sonstiges:
 
 Beispiele:
   sudo ./getpvelogs.sh --full --install-tools
-  sudo ./getpvelogs.sh --normal --output-dir /tmp
-  sudo ./getpvelogs.sh --normal --exclude ceph,smart --anonymize
+  sudo ./getpvelogs.sh --output-dir /tmp
+  sudo ./getpvelogs.sh --exclude ceph,smart --anonymize
 
 EOF
   exit 0
@@ -245,7 +245,6 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     # Betriebsmodi
-    --normal)         MODE="normal"          ;;
     --full)           MODE="full"            ;;
     
     # Tool-Installation

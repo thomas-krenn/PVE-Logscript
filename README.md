@@ -1,6 +1,6 @@
 # Proxmox VE Support Log Collector
 
-**Version:** 4.0.2 — 01/2026
+**Version:** 4.0.3 — 03/2026
 
 **Autor:** Samuel Müller
 
@@ -25,7 +25,7 @@ Die TUI-Version ermöglicht die komfortable Auswahl der zu sammelnden Informatio
 
 ## Neuerungen in Version 4.0
 
-* **Zwei Betriebsmodi:** `--normal` (Standard), `--full`
+* **Zwei Betriebsmodi:** Default (ohne Flag), `--full`
 * **Automatische Tool-Erkennung:** Alle benötigten Tools werden vor der Sammlung geprüft und bei Bedarf gesammelt nachinstalliert
 * **Anonymisierung:** Mit `--anonymize` werden IPs, MACs und Hostnamen automatisch ersetzt
 * **Erweiterte Hardware-Daten:** IPMI/BMC-Sensoren, Thermal-Daten (im `--full` Modus)
@@ -76,7 +76,7 @@ curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpv
 ## Beispiele
 
 ```bash
-# Standard-Ausführung (normal Modus) mit interaktiver Abfrage
+# Standard-Ausführung (Default) mit interaktiver Abfrage
 sudo ./getpvelogs.sh
 
 # Vollständige Datensammlung inkl. Hardware und Performance
@@ -106,8 +106,8 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 | Parameter | Beschreibung |
 |-----------|--------------|
-| `--normal` | Standard-Umfang: Journal, dmesg, PVE-Services, Netzwerk, Storage, SMART, Ceph, Cluster, VM/CT-Listen (Standard) |
-| `--full` | Normal + Hardware (IPMI, Thermal), VM/CT-Configs, Firewall, Performance, Backup/HA/Replication |
+| Default (ohne Flag) | Standard-Umfang: Journal, dmesg, PVE-Services, Netzwerk, Storage, SMART, Ceph, Cluster, VM/CT-Listen |
+| `--full` | Vollständig: Default + Hardware (IPMI, Thermal), VM/CT-Configs, Firewall, Performance, Backup/HA/Replication |
 
 ### Tool-Installation
 
@@ -146,7 +146,7 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 * Netzwerk-Konfiguration und Interface-Details
 * PVE Service-Status
 
-### Normal-Modus (zusätzlich zu Basis)
+### Default-Modus (zusätzlich zu Basis)
 
 * Storage: LVM, ZFS, MDADM
 * SMART-Daten (SATA/SAS und NVMe)
@@ -154,7 +154,7 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 * Cluster-Status (Corosync, Quorum)
 * VM/CT-Listen
 
-### Full-Modus (zusätzlich zu Normal)
+### Full-Modus (zusätzlich zu Default)
 
 * Hardware: IPMI/BMC-Sensoren, Thermal-Daten (lm-sensors)
 * VM/CT-Konfigurationsdateien
