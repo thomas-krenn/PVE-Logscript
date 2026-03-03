@@ -2,70 +2,70 @@
 
 **Version:** 4.0.3 — 03/2026
 
-**Autor:** Samuel Müller
+**Author:** Samuel Müller
 
-**Kontakt:** [smueller@thomas-krenn.com](mailto:smueller@thomas-krenn.com)
+**Contact:** [smueller@thomas-krenn.com](mailto:smueller@thomas-krenn.com)
 
 ---
 
-## Zweck
+## Purpose
 
-Dieses Skript sammelt diagnostisch relevante Systeminformationen von **Proxmox VE Hosts**, um Fehlersituationen reproduzierbarer, schneller und supportseitig besser analysieren zu können.
+This script collects diagnostically relevant system information from **Proxmox VE hosts** to make error situations more reproducible, faster, and easier to analyze for support purposes.
 
-Die Ausführung erfolgt **read-only**, mit Ausnahme der **optionalen Installation von Tools** wie `nvme-cli`, `ipmitool`, `lm-sensors` und `sysstat`.
+Execution is **read-only**, except for the **optional installation of tools** such as `nvme-cli`, `ipmitool`, `lm-sensors`, and `sysstat`.
 
-## Version mit TUI
-Eine Version des Tools mit TUI (Textbasierter Benutzeroberfläche) finden Sie hier:  
+## TUI Version
+
+A version of the tool with TUI (text-based user interface) is available here:  
 https://github.com/thomas-krenn/PVE-Logscript/tree/tui
 
-Die TUI-Version ermöglicht die komfortable Auswahl der zu sammelnden Informationsbereiche über ein Menüsystem und bietet Statusanzeigen für den Sammlungsfortschritt. Sie benötigen dafür das Zusatzpaket `dialog` (wird während der Ausführung automatisch geprüft). Die Bedienung ist vollständig per Tastatur möglich. Alle im Standard-Skript verfügbaren Optionen (Betriebsmodus, Anonymisierung, Zielverzeichnis etc.) stehen dort ebenfalls zur Verfügung.
-
-
----
-
-## Neuerungen in Version 4.0
-
-* **Zwei Betriebsmodi:** Default (ohne Flag), `--full`
-* **Automatische Tool-Erkennung:** Alle benötigten Tools werden vor der Sammlung geprüft und bei Bedarf gesammelt nachinstalliert
-* **Anonymisierung:** Mit `--anonymize` werden IPs, MACs und Hostnamen automatisch ersetzt
-* **Erweiterte Hardware-Daten:** IPMI/BMC-Sensoren, Thermal-Daten (im `--full` Modus)
-* **Erweiterte Proxmox-Daten:** VM/CT-Konfigurationen, Backup-Jobs, HA, Replication, SDN (im `--full` Modus)
-* **Firewall-Konfiguration:** PVE Firewall-Regeln und SSL-Zertifikate (im `--full` Modus)
-* **Performance-Daten:** iostat, vmstat, sar Snapshots (im `--full` Modus)
-* **Checksummen:** SHA256/MD5 des Archivs wird automatisch erstellt
-* **Selbsttest:** Mit `--check` werden alle verfügbaren Tools angezeigt (ohne Datensammlung)
+The TUI version allows convenient selection of information areas to collect via a menu system and provides status displays for collection progress. You need the additional package `dialog` (checked automatically during execution). Operation is fully keyboard-based. All options available in the standard script (operating mode, anonymization, target directory, etc.) are also available there.
 
 ---
 
-## Installation & Verwendung
+## What's New in Version 4.0
 
-### 1. Repository klonen
+* **Two operating modes:** Default (no flag), `--full`
+* **Automatic tool detection:** All required tools are checked before collection and installed if needed
+* **Anonymization:** With `--anonymize`, IPs, MACs, and hostnames are automatically replaced
+* **Extended hardware data:** IPMI/BMC sensors, thermal data (in `--full` mode)
+* **Extended Proxmox data:** VM/CT configurations, backup jobs, HA, replication, SDN (in `--full` mode)
+* **Firewall configuration:** PVE firewall rules and SSL certificates (in `--full` mode)
+* **Performance data:** iostat, vmstat, sar snapshots (in `--full` mode)
+* **Checksums:** SHA256/MD5 of the archive is created automatically
+* **Self-test:** With `--check`, all available tools are displayed (without data collection)
+
+---
+
+## Installation & Usage
+
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/thomas-krenn/PVE-Logscript.git
 ```
 
-### 2. In das Verzeichnis wechseln
+### 2. Change to the directory
 
 ```bash
 cd PVE-Logscript
 ```
 
-### 3. Skript ausführbar machen
+### 3. Make the script executable
 
 ```bash
 chmod +x getpvelogs.sh
 ```
 
-### 4. Skript ausführen (als root)
+### 4. Run the script (as root)
 
 ```bash
 sudo ./getpvelogs.sh
 ```
 
-### Alternativ: Einzeiler
+### Alternative: One-liner
 
-Falls das Skript nur einmalig benötigt wird:
+If the script is only needed once:
 
 ```bash
 curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpvelogs.sh | sudo bash
@@ -73,231 +73,231 @@ curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpv
 
 ---
 
-## Beispiele
+## Examples
 
 ```bash
-# Standard-Ausführung (Default) mit interaktiver Abfrage
+# Standard execution (default) with interactive prompt
 sudo ./getpvelogs.sh
 
-# Vollständige Datensammlung inkl. Hardware und Performance
+# Full data collection incl. hardware and performance
 sudo ./getpvelogs.sh --full --install-tools
 
-# Anonymisierte Ausgabe für DSGVO-konforme Weitergabe
+# Anonymized output for GDPR-compliant sharing
 sudo ./getpvelogs.sh --anonymize
 
-# Ausgabe in bestimmtes Verzeichnis
+# Output to specific directory
 sudo ./getpvelogs.sh --output-dir /tmp/logs
 
-# Bestimmte Bereiche ausschließen
+# Exclude specific sections
 sudo ./getpvelogs.sh --exclude ceph,smart
 
-# Selbsttest - zeigt verfügbare Tools ohne Datensammlung
+# Self-test - shows available tools without data collection
 ./getpvelogs.sh --check
 
-# Version anzeigen
+# Show version
 ./getpvelogs.sh --version
 ```
 
 ---
 
-## Parameter
+## Parameters
 
-### Betriebsmodi
+### Operating Modes
 
-| Parameter | Beschreibung |
+| Parameter | Description |
 |-----------|--------------|
-| Default (ohne Flag) | Standard-Umfang: Journal, dmesg, PVE-Services, Netzwerk, Storage, SMART, Ceph, Cluster, VM/CT-Listen |
-| `--full` | Vollständig: Default + Hardware (IPMI, Thermal), VM/CT-Configs, Firewall, Performance, Backup/HA/Replication |
+| Default (no flag) | Standard scope: Journal, dmesg, PVE services, network, storage, SMART, Ceph, cluster, VM/CT lists |
+| `--full` | Full: Default + hardware (IPMI, thermal), VM/CT configs, firewall, performance, backup/HA/replication |
 
-### Tool-Installation
+### Tool Installation
 
-| Parameter | Beschreibung |
+| Parameter | Description |
 |-----------|--------------|
-| `--install-tools` | Fehlende Tools automatisch installieren |
-| `--no-install` | Keine Tools installieren; fehlende Bereiche werden übersprungen |
+| `--install-tools` | Automatically install missing tools |
+| `--no-install` | Do not install tools; missing sections will be skipped |
 
-### Ausgabe-Optionen
+### Output Options
 
-| Parameter | Beschreibung |
+| Parameter | Description |
 |-----------|--------------|
-| `--output-dir PATH` | Ausgabeverzeichnis festlegen |
-| `--exclude SECTIONS` | Bereiche ausschließen (kommasepariert: `ceph,smart,network,storage,proxmox`) |
-| `--anonymize` | IPs, MACs und Hostnamen anonymisieren |
-| `--json-meta` | Metadaten zusätzlich als JSON exportieren |
-| `--verbose` | Detaillierte Ausgabe während der Ausführung |
+| `--output-dir PATH` | Set output directory |
+| `--exclude SECTIONS` | Exclude sections (comma-separated: `ceph,smart,network,storage,proxmox`) |
+| `--anonymize` | Anonymize IPs, MACs, and hostnames |
+| `--json-meta` | Export metadata additionally as JSON |
+| `--verbose` | Detailed output during execution |
 
-### Sonstiges
+### Miscellaneous
 
-| Parameter | Beschreibung |
+| Parameter | Description |
 |-----------|--------------|
-| `--keep-work` | Temporäres Arbeitsverzeichnis nicht löschen |
-| `--check` | Selbsttest: zeigt verfügbare Tools ohne Datensammlung |
-| `-v`, `--version` | Version anzeigen |
-| `-h`, `--help` | Hilfe anzeigen |
+| `--keep-work` | Do not delete temporary working directory |
+| `--check` | Self-test: shows available tools without data collection |
+| `-v`, `--version` | Show version |
+| `-h`, `--help` | Show help |
 
 ---
 
-## Funktionsumfang
+## Feature Scope
 
-### Basis (alle Modi)
+### Base (all modes)
 
-* Fortschrittsausgabe auf STDOUT
-* Kernel-dmesg und Journal-Logs
-* Netzwerk-Konfiguration und Interface-Details
-* PVE Service-Status
+* Progress output to STDOUT
+* Kernel dmesg and journal logs
+* Network configuration and interface details
+* PVE service status
 
-### Default-Modus (zusätzlich zu Basis)
+### Default Mode (in addition to base)
 
 * Storage: LVM, ZFS, MDADM
-* SMART-Daten (SATA/SAS und NVMe)
-* Ceph-Informationen (falls vorhanden)
-* Cluster-Status (Corosync, Quorum)
-* VM/CT-Listen
+* SMART data (SATA/SAS and NVMe)
+* Ceph information (if present)
+* Cluster status (Corosync, quorum)
+* VM/CT lists
 
-### Full-Modus (zusätzlich zu Default)
+### Full Mode (in addition to default)
 
-* Hardware: IPMI/BMC-Sensoren, Thermal-Daten (lm-sensors)
-* VM/CT-Konfigurationsdateien
-* Backup-Konfiguration (vzdump, Jobs)
-* HA-Manager Status und Konfiguration
-* Replication-Status
-* SDN-Konfiguration
-* Subscription-Status
-* Firewall-Regeln (Cluster, Host, VM)
-* SSL-Zertifikat-Informationen
-* SSH-Konfiguration
-* Performance-Snapshots: iostat, vmstat, sar
-* Boot-Konfiguration (GRUB, Kernel-Cmdline)
-* Systemd-Timer
+* Hardware: IPMI/BMC sensors, thermal data (lm-sensors)
+* VM/CT configuration files
+* Backup configuration (vzdump, jobs)
+* HA manager status and configuration
+* Replication status
+* SDN configuration
+* Subscription status
+* Firewall rules (cluster, host, VM)
+* SSL certificate information
+* SSH configuration
+* Performance snapshots: iostat, vmstat, sar
+* Boot configuration (GRUB, kernel cmdline)
+* Systemd timers
 
 ---
 
-## Ausgabestruktur
+## Output Structure
 
 ```text
 <hostname>_<serial>_<timestamp>.logs-XXXX/
 │
-├── _meta.txt                 Metadaten und Systemübersicht
-├── _meta.json                JSON-Metadaten (bei --json-meta)
-├── _tools_used.txt           Liste verwendeter Tools
-├── _errors.txt               Warnungen und Fehler
+├── _meta.txt                 Metadata and system overview
+├── _meta.json                JSON metadata (with --json-meta)
+├── _tools_used.txt           List of used tools
+├── _errors.txt               Warnings and errors
 │
-├── kernel_dmesg.txt          Kernel-Meldungen
-├── journal_*.txt             Journald-Logs
-├── smart.txt                 SMART-Daten
-├── nvme_list.txt             NVMe-Geräteliste
-├── zfs.txt                   ZFS-Status
-├── storage.txt               Storage-Übersicht
+├── kernel_dmesg.txt          Kernel messages
+├── journal_*.txt             Journald logs
+├── smart.txt                 SMART data
+├── nvme_list.txt             NVMe device list
+├── zfs.txt                   ZFS status
+├── storage.txt               Storage overview
 │
-├── system/                   System-Informationen
-│   ├── hw.txt                Hardware-Details
-│   ├── apt_history.txt       Paket-Historie
-│   ├── lvm.txt               LVM-Konfiguration
-│   ├── mdadm.txt             RAID-Status
-│   ├── syslog.txt            Syslog (falls kein journald)
-│   ├── boot_config.txt       Boot/GRUB-Konfiguration (--full)
-│   └── systemd_timers.txt    Systemd-Timer (--full)
+├── system/                   System information
+│   ├── hw.txt                Hardware details
+│   ├── apt_history.txt       Package history
+│   ├── lvm.txt               LVM configuration
+│   ├── mdadm.txt             RAID status
+│   ├── syslog.txt            Syslog (if no journald)
+│   ├── boot_config.txt       Boot/GRUB configuration (--full)
+│   └── systemd_timers.txt    Systemd timers (--full)
 │
-├── network/                  Netzwerk
-│   ├── network.txt           Netzwerk-Status
-│   ├── network_config.txt    Netzwerk-Konfiguration
-│   └── net-if/               Interface-Statistiken
+├── network/                  Network
+│   ├── network.txt           Network status
+│   ├── network_config.txt    Network configuration
+│   └── net-if/               Interface statistics
 │
 ├── proxmox/                  Proxmox VE
-│   ├── pveversion.txt        PVE-Version
-│   ├── pve_services.txt      PVE-Services
-│   ├── pve_vms.txt           VM/CT-Liste
-│   ├── pvereport.txt         PVE-Report
-│   ├── cluster.txt           Cluster-Status
-│   ├── subscription.txt      Subscription-Status (--full)
-│   ├── backup_config.txt     Backup-Konfiguration (--full)
-│   ├── ha_status.txt         HA-Manager Status (--full)
-│   ├── replication_status.txt Replication-Status (--full)
-│   ├── pbs_status.txt        PBS-Client Status (--full)
-│   ├── vm-configs/           VM-Konfigurationen (--full)
-│   ├── ct-configs/           CT-Konfigurationen (--full)
-│   ├── ha-config/            HA-Konfiguration (--full)
-│   └── sdn-config/           SDN-Konfiguration (--full)
+│   ├── pveversion.txt        PVE version
+│   ├── pve_services.txt      PVE services
+│   ├── pve_vms.txt           VM/CT list
+│   ├── pvereport.txt         PVE report
+│   ├── cluster.txt           Cluster status
+│   ├── subscription.txt      Subscription status (--full)
+│   ├── backup_config.txt     Backup configuration (--full)
+│   ├── ha_status.txt         HA manager status (--full)
+│   ├── replication_status.txt Replication status (--full)
+│   ├── pbs_status.txt        PBS client status (--full)
+│   ├── vm-configs/           VM configurations (--full)
+│   ├── ct-configs/           CT configurations (--full)
+│   ├── ha-config/            HA configuration (--full)
+│   └── sdn-config/           SDN configuration (--full)
 │
-├── security/                 Sicherheit (--full)
-│   ├── firewall_status.txt   Firewall-Status
-│   ├── firewall/             Firewall-Regeln
-│   ├── ssl_info.txt          SSL-Zertifikat-Info
-│   └── sshd_config.txt       SSH-Konfiguration
+├── security/                 Security (--full)
+│   ├── firewall_status.txt   Firewall status
+│   ├── firewall/             Firewall rules
+│   ├── ssl_info.txt          SSL certificate info
+│   └── sshd_config.txt       SSH configuration
 │
-├── hardware/                 Hardware-Details (--full)
-│   ├── ipmi_sensors.txt      IPMI Sensor-Werte
+├── hardware/                 Hardware details (--full)
+│   ├── ipmi_sensors.txt      IPMI sensor values
 │   ├── ipmi_sel.txt          IPMI System Event Log
-│   ├── ipmi_fru.txt          IPMI FRU-Daten
-│   └── sensors.txt           Thermal-Daten (lm-sensors)
+│   ├── ipmi_fru.txt          IPMI FRU data
+│   └── sensors.txt           Thermal data (lm-sensors)
 │
-├── performance/              Performance-Daten (--full)
-│   ├── top_processes.txt     Top-Prozesse (CPU/Memory)
-│   ├── iostat.txt            I/O-Statistiken
-│   ├── vmstat.txt            VM-Statistiken
-│   ├── sar_cpu.txt           SAR CPU-Daten
-│   └── sar_disk.txt          SAR Disk-Daten
+├── performance/              Performance data (--full)
+│   ├── top_processes.txt     Top processes (CPU/Memory)
+│   ├── iostat.txt            I/O statistics
+│   ├── vmstat.txt            VM statistics
+│   ├── sar_cpu.txt           SAR CPU data
+│   └── sar_disk.txt          SAR disk data
 │
-├── ceph/                     Ceph-Daten (falls vorhanden)
+├── ceph/                     Ceph data (if present)
 │
-└── logs/                     System- und PVE-Logs
+└── logs/                     System and PVE logs
 ```
 
 ---
 
-## Datenschutz / DSGVO-Hinweis
+## Privacy / GDPR Notice
 
-Dieses Skript kann unter anderem folgende Informationen sammeln:
+This script may collect the following information among others:
 
-* Hostnamen
-* Benutzernamen
-* VM- und CT-Namen
-* IP-Adressen
-* MAC-Adressen
+* Hostnames
+* Usernames
+* VM and CT names
+* IP addresses
+* MAC addresses
 
-### Anonymisierung
+### Anonymization
 
-Mit `--anonymize` werden automatisch anonymisiert:
+With `--anonymize`, the following are automatically anonymized:
 
-* **IP-Adressen:** ersetzt durch `X.X.X.X`
-* **MAC-Adressen:** ersetzt durch `XX:XX:XX:XX:XX:XX`
-* **Hostnamen:** ersetzt durch `HOSTNAME`
+* **IP addresses:** replaced by `X.X.X.X`
+* **MAC addresses:** replaced by `XX:XX:XX:XX:XX:XX`
+* **Hostnames:** replaced by `HOSTNAME`
 
-Vor einer Weitergabe an Dritte wird dennoch empfohlen, den Inhalt des Archivs zu prüfen.
-
----
-
-## Haftungsausschluss
-
-Dieses Skript dient als technische Hilfestellung.
-Die **Thomas-Krenn.AG** übernimmt **keine Haftung** für:
-
-* Datenverlust
-* unerwartetes Systemverhalten
-* Fehlinterpretationen der gesammelten Daten
-
-Die Ausführung sollte ausschließlich durch **fachkundige Personen** erfolgen.
+Before sharing with third parties, it is still recommended to review the archive contents.
 
 ---
 
-## Technische Details
+## Disclaimer
 
-* **Minimaler Speicherplatz:** 500 MB (wird vor Ausführung geprüft)
-* **Timeout:** 60 Sekunden für langsame Befehle (z.B. Ceph-Abfragen)
-* **Cleanup:** Bei Abbruch (Ctrl+C) wird das temporäre Verzeichnis automatisch aufgeräumt
-* **Laufwerkserkennung:** sda-sdz, sdaa-sdzz, NVMe-Namespaces
-* **Komprimierung:** zstd (bevorzugt) oder gzip als Fallback
-* **Checksummen:** SHA256 (bevorzugt) oder MD5 als Fallback
+This script serves as a technical aid.
+**Thomas-Krenn.AG** assumes **no liability** for:
+
+* Data loss
+* Unexpected system behavior
+* Misinterpretation of collected data
+
+Execution should only be performed by **qualified personnel**.
 
 ---
 
-## Empfehlung
+## Technical Details
 
-* **Vor Ausführung:**
-  Das Skript prüft automatisch den verfügbaren Speicherplatz. Bei weniger als 500 MB wird die Ausführung abgebrochen.
+* **Minimum disk space:** 500 MB (checked before execution)
+* **Timeout:** 60 seconds for slow commands (e.g. Ceph queries)
+* **Cleanup:** On abort (Ctrl+C), the temporary directory is automatically cleaned up
+* **Drive detection:** sda-sdz, sdaa-sdzz, NVMe namespaces
+* **Compression:** zstd (preferred) or gzip as fallback
+* **Checksums:** SHA256 (preferred) or MD5 as fallback
 
-* **Selbsttest:**
-  Mit `./getpvelogs.sh --check` können Sie vorab prüfen, welche Tools verfügbar sind.
+---
 
-* **Nach Ausführung:**
-  Das erzeugte Archiv und die Checksummen-Datei befinden sich im Arbeitsverzeichnis (oder im mit `--output-dir` angegebenen Verzeichnis) und können direkt für Supportzwecke weitergegeben werden.
+## Recommendations
+
+* **Before execution:**
+  The script automatically checks available disk space. With less than 500 MB, execution is aborted.
+
+* **Self-test:**
+  Use `./getpvelogs.sh --check` to verify which tools are available beforehand.
+
+* **After execution:**
+  The generated archive and checksum file are located in the working directory (or the directory specified with `--output-dir`) and can be shared directly for support purposes.
