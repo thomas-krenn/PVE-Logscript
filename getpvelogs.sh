@@ -1,76 +1,76 @@
 #!/usr/bin/env bash
 #
-# Version: 4.0.2-tui - 01/2026
+# Version: 4.0.3-tui - 03/2026
 # Thomas-Krenn.AG - Proxmox VE Support Log Collector
-# Autor: Samuel Mueller
-# Kontakt: smueller@thomas-krenn.com
+# Author: Samuel Mueller
+# Contact: smueller@thomas-krenn.com
 #
-# Zweck:
-#   Dieses Skript sammelt diagnostisch relevante Systeminformationen von
-#   Proxmox VE Hosts, um Fehlersituationen reproduzierbarer, schneller und
-#   supportseitig besser analysieren zu koennen. Die Ausfuehrung ist read-only,
-#   abgesehen von der optionalen Installation von Tools wie nvme-cli, ipmitool, etc.
+# Purpose:
+#   This script collects diagnostically relevant system information from
+#   Proxmox VE hosts to make error situations more reproducible, faster, and
+#   easier to analyze for support. Execution is read-only, except for
+#   optional installation of tools such as nvme-cli, ipmitool, etc.
 #
-# Funktionsumfang:
-#   - Zwei Betriebsmodi: --normal (Default), --full
-#   - Fortschritt-Ausgabe auf STDOUT (Sammle / Kopiere / Packe)
-#   - Erfassung von Kernel-, Journal-, System-, Storage- und Netzwerkdaten
-#   - Aggregation von Proxmox-Service- sowie VM/CT-Informationen
-#   - SMART- und optional NVMe-SMART-Daten
-#   - Ceph-Informationen (falls vorhanden) im eigenen Unterordner
-#   - Hardware-Informationen (IPMI, Thermal) im --full Modus
-#   - VM/CT-Konfigurationen, Backup, HA, Replication im --full Modus
-#   - Firewall-Konfiguration und SSL-Zertifikate im --full Modus
-#   - Performance-Daten (iostat, vmstat, sar) im --full Modus
-#   - Optionale Anonymisierung von IPs, MACs und Hostnamen
-#   - Speicherung genutzter optionaler Tools (_tools_used.txt)
-#   - Speicherung von Warnungen und Hinweisen (_errors.txt)
-#   - Checksummen-Generierung (SHA256/MD5)
+# Features:
+#   - Two operating modes: --normal (default), --full
+#   - Progress output to STDOUT (Collect / Copy / Pack)
+#   - Collection of kernel, journal, system, storage, and network data
+#   - Aggregation of Proxmox service and VM/CT information
+#   - SMART and optional NVMe-SMART data
+#   - Ceph information (if present) in its own subfolder
+#   - Hardware information (IPMI, thermal) in --full mode
+#   - VM/CT configurations, backup, HA, replication in --full mode
+#   - Firewall configuration and SSL certificates in --full mode
+#   - Performance data (iostat, vmstat, sar) in --full mode
+#   - Optional anonymization of IPs, MACs, and hostnames
+#   - Storage of used optional tools (_tools_used.txt)
+#   - Storage of warnings and hints (_errors.txt)
+#   - Checksum generation (SHA256/MD5)
 #
-# Betriebsmodi:
-#   --normal  Standard-Umfang: Journal, dmesg, PVE-Services, Netzwerk,
-#             Storage, SMART, Ceph, Cluster, VM/CT-Listen (Default)
-#   --full    Normal + Hardware (IPMI, Thermal), VM/CT-Configs, Firewall,
-#             Performance, Backup/HA/Replication
+# Operating modes:
+#   --normal  Standard scope: Journal, dmesg, PVE services, network,
+#             storage, SMART, Ceph, cluster, VM/CT lists (default)
+#   --full    Normal + hardware (IPMI, thermal), VM/CT configs, firewall,
+#             performance, backup/HA/replication
 #
-# Datenschutz / DSGVO-Hinweis:
-#   Dieses Skript kann Hostnamen, Benutzernamen, VM-Namen und IP-Adressen auslesen.
-#   Verwenden Sie --anonymize um diese Daten vor Weitergabe zu anonymisieren.
-#   Vor Weitergabe an Dritte ist eine Pruefung des Inhalts empfohlen.
+# Data protection / GDPR notice:
+#   This script may read hostnames, usernames, VM names, and IP addresses.
+#   Use --anonymize to anonymize this data before sharing.
+#   Review content before sharing with third parties.
 #
-# Haftungsausschluss:
-#   Dieses Skript stellt eine Hilfestellung dar. Die Thomas-Krenn.AG uebernimmt
-#   keine Haftung fuer Datenverlust, Systemverhalten oder Interpretationsfehler.
-#   Die Ausfuehrung sollte durch fachkundige Personen erfolgen.
+# Disclaimer:
+#   This script serves as technical assistance. Thomas-Krenn.AG assumes
+#   no liability for data loss, system behavior, or errors in interpretation.
+#   Execution should be performed by qualified personnel only.
 #
-# Empfehlung:
-#   Vor Ausfuehrung: Sicherstellen, dass ausreichend Speicherplatz verfuegbar ist.
-#   Nach Ausfuehrung: Archiv generiert in lokalem Arbeitsverzeichnis.
+# Recommendation:
+#   Before execution: Ensure sufficient disk space is available.
+#   After execution: Archive generated in local working directory.
 #
 
 set -Eeuo pipefail
 shopt -s nullglob
 shopt -s lastpipe
 
-# ---------- Konstanten ----------
-readonly VERSION="4.0.2-tui"
+# ---------- Constants ----------
+readonly VERSION="4.0.3-tui"
 readonly MIN_DISK_SPACE_MB=500
 readonly CMD_TIMEOUT=60
 
-# ---------- Globale Variablen ----------
+# ---------- Global Variables ----------
 ERRORS_FILE=""
 TOOLS_USED_FILE=""
 OUTDIR=""
 
-# ---------- Neue Optionen (v4.0) ----------
+# ---------- New Options (v4.0) ----------
 MODE="normal"              # normal|full
 VERBOSE="no"               # yes|no
 ANONYMIZE="no"             # yes|no
-OUTPUT_DIR=""              # Benutzerdefiniertes Ausgabeverzeichnis
-EXCLUDE_SECTIONS=""        # Kommaseparierte Liste auszuschliessender Bereiche
-JSON_META="no"             # yes|no - JSON-Metadaten exportieren
+OUTPUT_DIR=""              # Custom output directory
+EXCLUDE_SECTIONS=""        # Comma-separated list of sections to exclude
+JSON_META="no"             # yes|no - Export JSON metadata
 
-# Assoziatives Array fuer fehlende Tools
+# Associative array for missing tools
 declare -A MISSING_TOOLS=()
 
 # ---------- Helpers ----------
@@ -89,7 +89,7 @@ note_tool_use() {
   [[ -n "$TOOLS_USED_FILE" && -f "$TOOLS_USED_FILE" ]] && echo "$1" >> "$TOOLS_USED_FILE"
 }
 
-# Verbesserte run-Funktion mit optionalem Timeout
+# Improved run function with optional timeout
 run() {
   local out="$1"
   shift
@@ -97,40 +97,40 @@ run() {
   if have timeout; then
     timeout_cmd=(timeout "${CMD_TIMEOUT}s")
   fi
-  { "${timeout_cmd[@]}" "$@" >>"$out" 2>&1; } || warn "Fehler bei: $* (siehe $(basename "$out"))"
+  { "${timeout_cmd[@]}" "$@" >>"$out" 2>&1; } || warn "Error executing: $* (see $(basename "$out"))"
 }
 
-# Run ohne Timeout (fuer schnelle Befehle)
+# Run without timeout (for fast commands)
 run_quick() {
   local out="$1"
   shift
-  { "$@" >>"$out" 2>&1; } || warn "Fehler bei: $* (siehe $(basename "$out"))"
+  { "$@" >>"$out" 2>&1; } || warn "Error executing: $* (see $(basename "$out"))"
 }
 
-# ---------- Neue Helper-Funktionen (v4.0) ----------
+# ---------- New Helper Functions (v4.0) ----------
 
-# Verbose-Logging
+# Verbose logging
 log_verbose() {
   [[ "$VERBOSE" == "yes" ]] && printf '[%s] %s\n' "$(date -u +'%F %T UTC')" "$*"
 }
 
-# Prueft ob ein Bereich ausgeschlossen ist
+# Check if a section is excluded
 is_excluded() {
   local section="$1"
   [[ -n "$EXCLUDE_SECTIONS" && "$EXCLUDE_SECTIONS" == *"$section"* ]]
 }
 
-# Prueft ob Modus mindestens 'normal' ist (normal oder full)
+# Check if mode is at least 'normal' (normal or full)
 is_mode_normal_or_full() {
   [[ "$MODE" == "normal" || "$MODE" == "full" ]]
 }
 
-# Prueft ob Modus 'full' ist
+# Check if mode is 'full'
 is_mode_full() {
   [[ "$MODE" == "full" ]]
 }
 
-# Generiert Checksummen fuer das Archiv
+# Generate checksums for the archive
 generate_checksums() {
   local archive="$1"
   
@@ -143,13 +143,13 @@ generate_checksums() {
   fi
 }
 
-# Schreibt JSON-Metadaten
+# Write JSON metadata
 write_json_meta() {
   [[ "$JSON_META" != "yes" ]] && return 0
   
   local tools_json=""
   if [[ -f "$TOOLS_USED_FILE" && -s "$TOOLS_USED_FILE" ]]; then
-    # Tools als JSON-Array formatieren
+    # Format tools as JSON array
     tools_json=$(awk 'BEGIN{ORS=""} {if(NR>1)printf ","; printf "\"%s\"", $0}' "$TOOLS_USED_FILE") || true
   fi
   
@@ -165,13 +165,13 @@ write_json_meta() {
   "excluded_sections": "$EXCLUDE_SECTIONS"
 }
 EOF
-  log_verbose "JSON-Metadaten geschrieben: _meta.json"
+  log_verbose "JSON metadata written: _meta.json"
   return 0
 }
 
 require_root() {
   if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-    warn "Bitte als root ausfuehren."
+    warn "Please run as root."
     exit 1
   fi
 }
@@ -181,12 +181,12 @@ check_disk_space() {
   local available_mb
   available_mb=$(df -m "$target_dir" 2>/dev/null | awk 'NR==2 {print $4}')
   if [[ -n "$available_mb" && "$available_mb" -lt "$MIN_DISK_SPACE_MB" ]]; then
-    warn "Weniger als ${MIN_DISK_SPACE_MB}MB Speicherplatz verfuegbar (${available_mb}MB). Abbruch."
+    warn "Less than ${MIN_DISK_SPACE_MB}MB disk space available (${available_mb}MB). Aborting."
     exit 1
   fi
 }
 
-# Cleanup-Funktion fuer Trap
+# Cleanup function for trap
 cleanup() {
   local exit_code=$?
   if [[ -n "$OUTDIR" && -d "$OUTDIR" && "$KEEP_WORK" != "yes" ]]; then
@@ -204,34 +204,34 @@ show_help() {
 Usage: getpvelogs.sh [OPTIONS]
 
 Proxmox VE Support Log Collector v${VERSION}
-Sammelt diagnostisch relevante Systeminformationen von Proxmox VE Hosts.
+Collects diagnostically relevant system information from Proxmox VE hosts.
 
-Interaktiver Modus:
-  -i, --interactive   Interaktive TUI (whiptail) starten
+Interactive mode:
+  -i, --interactive   Start interactive TUI (whiptail)
 
-Betriebsmodi:
-  --normal            Standard-Umfang (Default)
-  --full              Vollstaendige Datensammlung inkl. Hardware
+Operating modes:
+  --normal            Standard scope (normal, default)
+  --full              Full data collection incl. hardware
 
-Tool-Installation:
-  --install-tools     Fehlende Tools automatisch installieren
-  --no-install        Keine Tools installieren
+Tool installation:
+  --install-tools     Automatically install missing tools
+  --no-install        Do not install tools
 
-Ausgabe:
-  --output-dir PATH   Ausgabeverzeichnis festlegen
-  --exclude SECTIONS  Bereiche ausschliessen (kommasepariert: ceph,smart,network,storage,proxmox)
-  --anonymize         IPs, MACs und Hostnamen anonymisieren
-  --json-meta         Metadaten als JSON exportieren
-  --verbose           Detaillierte Ausgabe
+Output:
+  --output-dir PATH   Set output directory
+  --exclude SECTIONS   Exclude sections (comma-separated: ceph,smart,network,storage,proxmox)
+  --anonymize         Anonymize IPs, MACs, and hostnames
+  --json-meta         Export metadata as JSON
+  --verbose           Detailed output
 
-Sonstiges:
-  --keep-work         Arbeitsverzeichnis behalten
-  --check             Selbsttest (zeigt verfuegbare Tools)
-  -v, --version       Version anzeigen
-  -h, --help          Diese Hilfe anzeigen
+Other:
+  --keep-work         Keep working directory
+  --check             Self-test (shows available tools)
+  -v, --version       Show version
+  -h, --help          Show this help
 
-Beispiele:
-  sudo ./getpvelogs.sh --interactive        # Interaktiver Modus mit TUI
+Examples:
+  sudo ./getpvelogs.sh --interactive        # Interactive mode with TUI
   sudo ./getpvelogs.sh --full --install-tools
   sudo ./getpvelogs.sh --normal --output-dir /tmp
   sudo ./getpvelogs.sh --normal --exclude ceph,smart --anonymize
@@ -240,21 +240,21 @@ EOF
   exit 0
 }
 
-# Parameter-Parsing mit while-Schleife fuer Argumente mit Werten
+# Parameter parsing with while loop for arguments with values
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    # Betriebsmodi
+    # Operating modes
     --normal)         MODE="normal"          ;;
     --full)           MODE="full"            ;;
     
-    # Tool-Installation
+    # Tool installation
     --install-tools)  AUTO_INSTALL_TOOLS="yes" ;;
     --no-install)     AUTO_INSTALL_TOOLS="no"  ;;
     
-    # Ausgabe-Optionen
+    # Output options
     --output-dir)
       shift
-      [[ $# -eq 0 ]] && { warn "--output-dir benoetigt einen Pfad"; exit 1; }
+      [[ $# -eq 0 ]] && { warn "--output-dir requires a path"; exit 1; }
       OUTPUT_DIR="$1"
       ;;
     --output-dir=*)
@@ -262,7 +262,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --exclude)
       shift
-      [[ $# -eq 0 ]] && { warn "--exclude benoetigt eine Bereichsliste"; exit 1; }
+      [[ $# -eq 0 ]] && { warn "--exclude requires a section list"; exit 1; }
       EXCLUDE_SECTIONS="$1"
       ;;
     --exclude=*)
@@ -272,10 +272,10 @@ while [[ $# -gt 0 ]]; do
     --json-meta)      JSON_META="yes"        ;;
     --verbose)        VERBOSE="yes"          ;;
     
-    # Sonstiges
+    # Other
     --keep-work)      KEEP_WORK="yes"        ;;
     --check)
-      # Selbsttest wird spaeter ausgefuehrt
+      # Self-test will be executed later
       RUN_SELFTEST="yes"
       ;;
     -i|--interactive)
@@ -289,48 +289,48 @@ while [[ $# -gt 0 ]]; do
       show_help
       ;;
     *)
-      warn "Unbekannte Option: $1"
+      warn "Unknown option: $1"
       ;;
   esac
   shift
 done
 
-# Variable fuer Selbsttest initialisieren falls nicht gesetzt
+# Initialize variable for self-test if not set
 RUN_SELFTEST="${RUN_SELFTEST:-no}"
 INTERACTIVE="${INTERACTIVE:-no}"
 
-# ---------- Interaktive TUI (whiptail) ----------
+# ---------- Interactive TUI (whiptail) ----------
 
-# Prueft ob whiptail verfuegbar ist
+# Check if whiptail is available
 check_whiptail() {
   if ! have whiptail; then
-    echo "FEHLER: whiptail ist nicht installiert."
-    echo "Installieren Sie es mit: apt-get install whiptail"
+    echo "ERROR: whiptail is not installed."
+    echo "Install it with: apt-get install whiptail"
     echo ""
-    echo "Alternativ koennen Sie das Skript mit Parametern ausfuehren:"
+    echo "Alternatively, you can run the script with parameters:"
     echo "  $0 --help"
     exit 1
   fi
 }
 
-# Zeigt den Willkommens-Dialog
+# Show welcome dialog
 show_welcome() {
   whiptail --title "PVE Support Log Collector v${VERSION}" \
-    --msgbox "Willkommen zum Proxmox VE Support Log Collector!\n\n\
-Dieses Tool sammelt diagnostisch relevante Systeminformationen\n\
-von Proxmox VE Hosts fuer den Support.\n\n\
-Die Ausfuehrung ist read-only (bis auf optionale Tool-Installation).\n\n\
-Druecken Sie OK, um fortzufahren." 16 65
+    --msgbox "Welcome to the Proxmox VE Support Log Collector!\n\n\
+This tool collects diagnostically relevant system information\n\
+from Proxmox VE hosts for support purposes.\n\n\
+Execution is read-only (except for optional tool installation).\n\n\
+Press OK to continue." 16 65
 }
 
-# Modus-Auswahl
+# Mode selection
 select_mode() {
   local choice
-  choice=$(whiptail --title "Betriebsmodus waehlen" \
-    --radiolist "Waehlen Sie den Umfang der Datensammlung:\n\n\
-Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 16 78 2 \
-    "normal" "Standard: Journal, dmesg, Storage, SMART, Ceph, Cluster [Empfohlen]" ON \
-    "full" "Vollstaendig: + Hardware, VM-Configs, Performance" OFF \
+  choice=$(whiptail --title "Select Operating Mode" \
+    --radiolist "Choose the scope of data collection:\n\n\
+Use SPACE to select, ENTER to confirm." 16 78 2 \
+    "normal" "Standard: Journal, dmesg, Storage, SMART, Ceph, Cluster [Recommended]" ON \
+    "full" "Full: + Hardware, VM configs, Performance" OFF \
     3>&1 1>&2 2>&3)
   
   local exitstatus=$?
@@ -342,15 +342,15 @@ Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 16 78 2 \
   return 0
 }
 
-# Tool-Installation Option
+# Tool installation option
 select_tool_install() {
   local choice
-  choice=$(whiptail --title "Tool-Installation" \
-    --radiolist "Wie sollen fehlende optionale Tools behandelt werden?\n\n\
-Optionale Tools erweitern die Datensammlung (z.B. nvme-cli, ipmitool)." 16 70 3 \
-    "ask" "Nachfragen - Bei fehlenden Tools einzeln fragen" ON \
-    "yes" "Automatisch - Fehlende Tools ohne Nachfrage installieren" OFF \
-    "no" "Nicht installieren - Fehlende Bereiche ueberspringen" OFF \
+  choice=$(whiptail --title "Tool Installation" \
+    --radiolist "How should missing optional tools be handled?\n\n\
+Optional tools extend data collection (e.g. nvme-cli, ipmitool)." 16 70 3 \
+    "ask" "Ask - Prompt for each missing tool" ON \
+    "yes" "Automatic - Install missing tools without prompting" OFF \
+    "no" "Do not install - Skip missing sections" OFF \
     3>&1 1>&2 2>&3)
   
   local exitstatus=$?
@@ -362,16 +362,16 @@ Optionale Tools erweitern die Datensammlung (z.B. nvme-cli, ipmitool)." 16 70 3 
   return 0
 }
 
-# Optionale Features (Checkboxen)
+# Optional features (checkboxes)
 select_options() {
   local choices
-  choices=$(whiptail --title "Zusaetzliche Optionen" \
-    --checklist "Waehlen Sie zusaetzliche Optionen:\n\n\
-Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 75 6 \
-    "anonymize" "Anonymisieren - IPs, MACs und Hostnamen ersetzen" OFF \
-    "json-meta" "JSON-Metadaten - Zusaetzliche JSON-Datei erstellen" OFF \
-    "verbose" "Verbose - Detaillierte Ausgabe waehrend Sammlung" OFF \
-    "keep-work" "Arbeitsverzeichnis behalten (nicht loeschen)" OFF \
+  choices=$(whiptail --title "Additional Options" \
+    --checklist "Select additional options:\n\n\
+Use SPACE to select, ENTER to confirm." 18 75 6 \
+    "anonymize" "Anonymize - Replace IPs, MACs, and hostnames" OFF \
+    "json-meta" "JSON metadata - Create additional JSON file" OFF \
+    "verbose" "Verbose - Detailed output during collection" OFF \
+    "keep-work" "Keep working directory (do not delete)" OFF \
     3>&1 1>&2 2>&3)
   
   local exitstatus=$?
@@ -379,7 +379,7 @@ Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 75 6 \
     return 1
   fi
   
-  # Optionen parsen
+  # Parse options
   [[ "$choices" == *"anonymize"* ]] && ANONYMIZE="yes"
   [[ "$choices" == *"json-meta"* ]] && JSON_META="yes"
   [[ "$choices" == *"verbose"* ]] && VERBOSE="yes"
@@ -388,28 +388,28 @@ Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 75 6 \
   return 0
 }
 
-# Bereiche ausschliessen (optional)
+# Exclude sections (optional)
 select_excludes() {
-  # Nur fragen wenn gewuenscht
-  if ! whiptail --title "Bereiche ausschliessen?" \
-    --yesno "Moechten Sie bestimmte Bereiche von der Datensammlung ausschliessen?\n\n\
-Dies ist nuetzlich, wenn Sie z.B. kein Ceph nutzen oder\n\
-SMART-Daten nicht benoetigen." 12 65; then
+  # Only ask if desired
+  if ! whiptail --title "Exclude Sections?" \
+    --yesno "Do you want to exclude certain sections from data collection?\n\n\
+This is useful if you e.g. don't use Ceph or\n\
+don't need SMART data." 12 65; then
     return 0
   fi
   
   local choices
-  choices=$(whiptail --title "Bereiche ausschliessen" \
-    --checklist "Waehlen Sie Bereiche, die NICHT gesammelt werden sollen:\n\n\
-Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 70 6 \
-    "ceph" "Ceph-Cluster Informationen" OFF \
-    "smart" "SMART/NVMe Festplattendaten" OFF \
-    "storage" "Storage-Informationen (LVM, ZFS, MDADM)" OFF \
-    "network" "Erweiterte Netzwerkdaten" OFF \
-    "proxmox" "Proxmox-spezifische Daten" OFF \
-    "hardware" "Hardware-Daten (nur bei --full relevant)" OFF \
-    "firewall" "Firewall-Konfiguration (nur bei --full)" OFF \
-    "performance" "Performance-Daten (nur bei --full)" OFF \
+  choices=$(whiptail --title "Exclude Sections" \
+    --checklist "Select sections that should NOT be collected:\n\n\
+Use SPACE to select, ENTER to confirm." 18 70 6 \
+    "ceph" "Ceph cluster information" OFF \
+    "smart" "SMART/NVMe disk data" OFF \
+    "storage" "Storage information (LVM, ZFS, MDADM)" OFF \
+    "network" "Extended network data" OFF \
+    "proxmox" "Proxmox-specific data" OFF \
+    "hardware" "Hardware data (only relevant for --full)" OFF \
+    "firewall" "Firewall configuration (only for --full)" OFF \
+    "performance" "Performance data (only for --full)" OFF \
     3>&1 1>&2 2>&3)
   
   local exitstatus=$?
@@ -417,26 +417,26 @@ Verwenden Sie LEERTASTE zum Auswaehlen, ENTER zum Bestaetigen." 18 70 6 \
     return 1
   fi
   
-  # Kommaseparierte Liste erstellen
+  # Create comma-separated list
   if [[ -n "$choices" ]]; then
-    # Anfuehrungszeichen entfernen und durch Kommas trennen
+    # Remove quotes and separate by commas
     EXCLUDE_SECTIONS=$(echo "$choices" | tr -d '"' | tr ' ' ',')
   fi
   
   return 0
 }
 
-# Ausgabeverzeichnis waehlen (optional)
+# Select output directory (optional)
 select_output_dir() {
-  if ! whiptail --title "Ausgabeverzeichnis" \
-    --yesno "Moechten Sie ein eigenes Ausgabeverzeichnis festlegen?\n\n\
-Standard: Aktuelles Verzeichnis ($(pwd))" 10 65; then
+  if ! whiptail --title "Output Directory" \
+    --yesno "Do you want to set a custom output directory?\n\n\
+Default: Current directory ($(pwd))" 10 65; then
     return 0
   fi
   
   local dir
-  dir=$(whiptail --title "Ausgabeverzeichnis" \
-    --inputbox "Geben Sie den Pfad zum Ausgabeverzeichnis ein:" 10 65 \
+  dir=$(whiptail --title "Output Directory" \
+    --inputbox "Enter the path to the output directory:" 10 65 \
     "$(pwd)" 3>&1 1>&2 2>&3)
   
   local exitstatus=$?
@@ -451,48 +451,48 @@ Standard: Aktuelles Verzeichnis ($(pwd))" 10 65; then
   return 0
 }
 
-# Zusammenfassung und Bestaetigung
+# Summary and confirmation
 show_summary() {
-  local exclude_text="Keine"
+  local exclude_text="None"
   [[ -n "$EXCLUDE_SECTIONS" ]] && exclude_text="$EXCLUDE_SECTIONS"
   
   local output_text="${OUTPUT_DIR:-$(pwd)}"
   
   local options_text=""
-  [[ "$ANONYMIZE" == "yes" ]] && options_text+="Anonymisierung, "
-  [[ "$JSON_META" == "yes" ]] && options_text+="JSON-Meta, "
+  [[ "$ANONYMIZE" == "yes" ]] && options_text+="Anonymization, "
+  [[ "$JSON_META" == "yes" ]] && options_text+="JSON meta, "
   [[ "$VERBOSE" == "yes" ]] && options_text+="Verbose, "
-  [[ "$KEEP_WORK" == "yes" ]] && options_text+="Arbeitsverz. behalten, "
-  [[ -z "$options_text" ]] && options_text="Keine"
-  options_text="${options_text%, }"  # Letztes Komma entfernen
+  [[ "$KEEP_WORK" == "yes" ]] && options_text+="Keep work dir, "
+  [[ -z "$options_text" ]] && options_text="None"
+  options_text="${options_text%, }"  # Remove trailing comma
   
-  local install_text="Nachfragen"
-  [[ "$AUTO_INSTALL_TOOLS" == "yes" ]] && install_text="Automatisch"
-  [[ "$AUTO_INSTALL_TOOLS" == "no" ]] && install_text="Nicht installieren"
+  local install_text="Ask"
+  [[ "$AUTO_INSTALL_TOOLS" == "yes" ]] && install_text="Automatic"
+  [[ "$AUTO_INSTALL_TOOLS" == "no" ]] && install_text="Do not install"
   
-  whiptail --title "Zusammenfassung" \
-    --yesno "Bitte ueberpruefen Sie Ihre Auswahl:\n\n\
-  Betriebsmodus:       $MODE\n\
-  Tool-Installation:   $install_text\n\
-  Ausgabeverzeichnis:  $output_text\n\
-  Ausgeschlossen:      $exclude_text\n\
-  Optionen:            $options_text\n\n\
-Moechten Sie die Datensammlung jetzt starten?" 18 70
+  whiptail --title "Summary" \
+    --yesno "Please review your selection:\n\n\
+  Operating mode:      $MODE\n\
+  Tool installation:   $install_text\n\
+  Output directory:    $output_text\n\
+  Excluded:           $exclude_text\n\
+  Options:            $options_text\n\n\
+Do you want to start data collection now?" 18 70
   
   return $?
 }
 
-# Fortschritts-Dialog (Gauge)
+# Progress dialog (gauge)
 show_progress() {
   local percent=$1
   local message=$2
   echo -e "XXX\n$percent\n$message\nXXX"
 }
 
-# Schnellstart-Menue
-# Setzt TUI_QUICKSTART="yes" wenn Schnellstart gewaehlt wurde
-# Setzt TUI_CUSTOM="yes" wenn benutzerdefiniert gewaehlt wurde
-# Return 0 = Erfolg, Return 1 = Abgebrochen
+# Quick start menu
+# Sets TUI_QUICKSTART="yes" when quick start is selected
+# Sets TUI_CUSTOM="yes" when custom is selected
+# Return 0 = success, Return 1 = cancelled
 TUI_QUICKSTART="no"
 TUI_CUSTOM="no"
 
@@ -502,13 +502,13 @@ show_quickstart() {
   
   local choice
   choice=$(whiptail --title "PVE Support Log Collector v${VERSION}" \
-    --menu "Willkommen! Waehlen Sie eine Option:" 16 70 4 \
-    "quick-normal" "Schnellstart - Standardmodus (empfohlen)" \
-    "quick-full" "Schnellstart - Vollstaendiger Modus" \
-    "custom" "Benutzerdefiniert - Alle Optionen durchgehen" \
-    "selftest" "Systemtest - Verfuegbare Tools anzeigen" \
+    --menu "Welcome! Choose an option:" 16 70 4 \
+    "quick-normal" "Quick Start - Normal mode (recommended)" \
+    "quick-full" "Quick Start - Full mode" \
+    "custom" "Custom - Go through all options" \
+    "selftest" "System test - Show available tools" \
     3>&1 1>&2 2>&3) || {
-      # Benutzer hat Abbrechen gedrueckt
+      # User pressed Cancel
       return 1
     }
   
@@ -533,147 +533,147 @@ show_quickstart() {
       clear
       run_selftest
       echo ""
-      read -rp "Druecken Sie ENTER um fortzufahren..." || true
-      # Rekursiv neu starten
+      read -rp "Press ENTER to continue..." || true
+      # Restart recursively
       show_quickstart
       return $?
       ;;
     *)
-      # Sollte nicht passieren, aber sicherheitshalber
+      # Should not happen, but just in case
       return 1
       ;;
   esac
 }
 
-# Bestaetigung fuer Schnellstart
+# Confirmation for quick start
 confirm_quickstart() {
   local mode_desc=""
   case "$MODE" in
-    normal) mode_desc="Standard (empfohlen)" ;;
-    full)   mode_desc="Vollstaendig (inkl. Hardware/Performance)" ;;
+    normal) mode_desc="Standard (recommended)" ;;
+    full)   mode_desc="Full (incl. hardware/performance)" ;;
   esac
   
-  whiptail --title "Schnellstart bestaetigen" \
-    --yesno "Datensammlung starten mit:\n\n\
-  Modus: $mode_desc\n\
-  Ausgabe: $(pwd)\n\
-  Tool-Installation: Bei Bedarf nachfragen\n\n\
-Moechten Sie fortfahren?" 14 60
+  whiptail --title "Confirm Quick Start" \
+    --yesno "Start data collection with:\n\n\
+  Mode: $mode_desc\n\
+  Output: $(pwd)\n\
+  Tool installation: Ask when needed\n\n\
+Do you want to continue?" 14 60
   
   return $?
 }
 
-# Hauptfunktion fuer die TUI
+# Main function for TUI
 run_interactive_tui() {
   check_whiptail
   
-  # Pruefe root-Rechte vor TUI-Start
+  # Check root privileges before TUI start
   if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-    whiptail --title "Fehler" \
-      --msgbox "Dieses Skript muss als root ausgefuehrt werden!\n\n\
-Bitte starten Sie es erneut mit:\n\
+    whiptail --title "Error" \
+      --msgbox "This script must be run as root!\n\n\
+Please restart it with:\n\
   sudo $0 --interactive" 12 55
     exit 1
   fi
   
-  # Schnellstart-Menue anzeigen
+  # Show quick start menu
   if ! show_quickstart; then
-    whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+    whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
     exit 0
   fi
   
   if [[ "$TUI_QUICKSTART" == "yes" ]]; then
-    # Schnellstart - nur Bestaetigung
+    # Quick start - confirmation only
     if ! confirm_quickstart; then
-      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
       exit 0
     fi
   elif [[ "$TUI_CUSTOM" == "yes" ]]; then
-    # Benutzerdefiniert - alle Dialoge durchlaufen
+    # Custom - go through all dialogs
     
-    # Willkommen
+    # Welcome
     show_welcome
     
-    # Modus auswaehlen
+    # Select mode
     if ! select_mode; then
-      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
       exit 0
     fi
     
-    # Tool-Installation
+    # Tool installation
     if ! select_tool_install; then
-      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
       exit 0
     fi
     
-    # Zusaetzliche Optionen
+    # Additional options
     if ! select_options; then
-      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
       exit 0
     fi
     
-    # Bereiche ausschliessen
+    # Exclude sections
     if ! select_excludes; then
-      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
       exit 0
     fi
     
-    # Ausgabeverzeichnis
+    # Output directory
     if ! select_output_dir; then
-      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
       exit 0
     fi
     
-    # Zusammenfassung und Bestaetigung
+    # Summary and confirmation
     if ! show_summary; then
-      whiptail --title "Abgebrochen" --msgbox "Vorgang abgebrochen." 8 40
+      whiptail --title "Cancelled" --msgbox "Operation cancelled." 8 40
       exit 0
     fi
   fi
   
-  # TUI beenden, normaler Ablauf wird fortgesetzt
-  whiptail --title "Starte Datensammlung" \
-    --infobox "Die Datensammlung wird gestartet...\n\n\
-Die Ausgabe erfolgt nun im Terminal." 8 50
+  # End TUI, normal script flow continues
+  whiptail --title "Starting Data Collection" \
+    --infobox "Data collection is starting...\n\n\
+Output will now appear in the terminal." 8 50
   
   sleep 2
   clear
   
-  # Zurueck zum normalen Skript-Ablauf
+  # Return to normal script flow
   return 0
 }
 
-# ---------- Tool-Check-System ----------
-# Prueft alle benoetigten Tools und fragt gesammelt nach Installation
+# ---------- Tool Check System ----------
+# Checks all required tools and prompts for installation
 
 check_all_tools() {
-  # Tools nur im entsprechenden Modus pruefen
-  have nvme     || MISSING_TOOLS[nvme-cli]="NVMe SMART-Daten"
+  # Check tools only in corresponding mode
+  have nvme     || MISSING_TOOLS[nvme-cli]="NVMe SMART data"
   
-  # Tools nur fuer --full Modus relevant
+  # Tools only relevant for --full mode
   if [[ "$MODE" == "full" ]]; then
-    have ipmitool || MISSING_TOOLS[ipmitool]="IPMI/BMC Sensor-Daten"
-    have sensors  || MISSING_TOOLS[lm-sensors]="Thermal-Daten"
-    have iostat   || MISSING_TOOLS[sysstat]="Performance-Statistiken (iostat, sar)"
+    have ipmitool || MISSING_TOOLS[ipmitool]="IPMI/BMC sensor data"
+    have sensors  || MISSING_TOOLS[lm-sensors]="Thermal data"
+    have iostat   || MISSING_TOOLS[sysstat]="Performance statistics (iostat, sar)"
   fi
 }
 
 install_missing_tools() {
   if ! have apt-get; then
-    warn "Kein apt-get verfuegbar - Installation nicht moeglich."
-    return 0  # Kein Fehler, nur Warnung
+    warn "No apt-get available - installation not possible."
+    return 0  # Not an error, just a warning
   fi
   
-  log "Aktualisiere Paketlisten..."
-  apt-get update -qq || warn "apt-get update fehlgeschlagen"
+  log "Updating package lists..."
+  apt-get update -qq || warn "apt-get update failed"
   
   for pkg in "${!MISSING_TOOLS[@]}"; do
-    log "Installiere $pkg..."
+    log "Installing $pkg..."
     if DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg" >/dev/null 2>&1; then
-      note_tool_use "$pkg (nachinstalliert)"
+      note_tool_use "$pkg (installed)"
       unset "MISSING_TOOLS[$pkg]" || true
     else
-      warn "Installation von $pkg fehlgeschlagen."
+      warn "Installation of $pkg failed."
     fi
   done
   
@@ -684,7 +684,7 @@ prompt_install_tools() {
   [[ ${#MISSING_TOOLS[@]} -eq 0 ]] && return 0
   
   echo ""
-  echo "Folgende optionale Tools fehlen:"
+  echo "The following optional tools are missing:"
   for pkg in "${!MISSING_TOOLS[@]}"; do
     echo "  - $pkg: ${MISSING_TOOLS[$pkg]}"
   done
@@ -695,16 +695,16 @@ prompt_install_tools() {
       install_missing_tools || true
       ;;
     no)
-      log "Tools werden nicht installiert - einige Bereiche werden ausgelassen."
+      log "Tools will not be installed - some sections will be skipped."
       ;;
     ask)
-      read -rp "Moechten Sie die fehlenden Tools installieren? [y/N] " ans || true
+      read -rp "Do you want to install the missing tools? [y/N] " ans || true
       case "$ans" in
         y|Y)
           install_missing_tools || true
           ;;
         *)
-          log "Tools werden nicht installiert - einige Bereiche werden ausgelassen."
+          log "Tools will not be installed - some sections will be skipped."
           ;;
       esac
       ;;
@@ -713,7 +713,7 @@ prompt_install_tools() {
   return 0
 }
 
-# Legacy-Funktion fuer Kompatibilitaet (wird nicht mehr direkt verwendet)
+# Legacy function for compatibility (no longer used directly)
 maybe_install_nvme_cli() {
   if have nvme; then
     note_tool_use "nvme-cli"
@@ -722,71 +722,71 @@ maybe_install_nvme_cli() {
   return 1
 }
 
-# ---------- Neue Datensammler (v4.0) ----------
+# ---------- New Data Collectors (v4.0) ----------
 
-# Hardware-Datensammler: IPMI und Thermal (nur --full)
+# Hardware data collector: IPMI and thermal (--full only)
 collect_hardware_extended() {
   is_mode_full || return 0
   is_excluded "hardware" && return 0
   
-  log_verbose "Sammle erweiterte Hardware-Informationen..."
+  log_verbose "Collecting extended hardware information..."
   
-  # IPMI/BMC - mit schneller Vorab-Pruefung
+  # IPMI/BMC - with quick pre-check
   if have ipmitool; then
-    # Schneller Test ob IPMI ueberhaupt verfuegbar ist (max 5 Sekunden)
+    # Quick test if IPMI is available at all (max 5 seconds)
     if timeout 5s ipmitool mc info >/dev/null 2>&1; then
       note_tool_use "ipmitool"
-      log_verbose "Sammle IPMI-Sensordaten..."
+      log_verbose "Collecting IPMI sensor data..."
       
-      # BMC Info sammeln
+      # Collect BMC info
       {
         echo "=== BMC Info ==="
-        timeout 10s ipmitool mc info 2>&1 || echo "(Fehler beim Abrufen)"
+        timeout 10s ipmitool mc info 2>&1 || echo "(Error fetching)"
         echo ""
       } > "$OUTDIR/hardware/ipmi_info.txt"
       
-      # Sensoren (mit Fallback-Nachricht)
+      # Sensors (with fallback message)
       {
         echo "=== IPMI Sensors ==="
         local sensor_output
         sensor_output=$(timeout 15s ipmitool sensor list 2>&1) || true
         if [[ -z "$sensor_output" ]]; then
-          echo "(Keine IPMI-Sensoren verfuegbar oder konfiguriert)"
+          echo "(No IPMI sensors available or configured)"
         elif [[ "$sensor_output" == *"not found"* ]] || [[ "$sensor_output" == *"Unknown"* ]]; then
-          echo "(IPMI-Sensoren nicht lesbar)"
+          echo "(IPMI sensors not readable)"
           echo ""
-          echo "Rohe Ausgabe:"
+          echo "Raw output:"
           echo "$sensor_output"
         else
           echo "$sensor_output"
         fi
       } > "$OUTDIR/hardware/ipmi_sensors.txt"
       
-      # System Event Log (mit Fallback-Nachricht)
+      # System Event Log (with fallback message)
       {
         echo "=== IPMI System Event Log ==="
         local sel_output
         sel_output=$(timeout 15s ipmitool sel list 2>&1) || true
         if [[ -z "$sel_output" ]]; then
-          echo "(System Event Log ist leer)"
+          echo "(System Event Log is empty)"
         elif [[ "$sel_output" == *"not found"* ]]; then
-          echo "(Keine SEL-Eintraege vorhanden - System Event Log ist leer)"
+          echo "(No SEL entries - System Event Log is empty)"
         else
           echo "$sel_output"
         fi
       } > "$OUTDIR/hardware/ipmi_sel.txt"
       
-      # FRU Daten (mit Fallback-Nachricht)
+      # FRU data (with fallback message)
       {
         echo "=== IPMI FRU Data ==="
         local fru_output
         fru_output=$(timeout 15s ipmitool fru print 2>&1) || true
         if [[ -z "$fru_output" ]]; then
-          echo "(Keine FRU-Daten verfuegbar)"
+          echo "(No FRU data available)"
         elif [[ "$fru_output" == *"Unknown FRU"* ]] || [[ "$fru_output" == *"not found"* ]]; then
-          echo "(FRU-Daten nicht konfiguriert oder nicht lesbar)"
+          echo "(FRU data not configured or not readable)"
           echo ""
-          echo "Rohe Ausgabe:"
+          echo "Raw output:"
           echo "$fru_output"
         else
           echo "$fru_output"
@@ -794,41 +794,41 @@ collect_hardware_extended() {
       } > "$OUTDIR/hardware/ipmi_fru.txt"
       
     else
-      log_verbose "IPMI/BMC nicht erreichbar - IPMI-Daten werden ausgelassen."
+      log_verbose "IPMI/BMC not reachable - IPMI data will be skipped."
       {
         echo "=== IPMI Status ==="
-        echo "IPMI/BMC nicht erreichbar oder nicht vorhanden."
+        echo "IPMI/BMC not reachable or not present."
         echo ""
-        echo "Moegliche Ursachen:"
-        echo "  - System ist eine virtuelle Maschine"
-        echo "  - Kein BMC/IPMI-Controller vorhanden"
-        echo "  - IPMI-Treiber nicht geladen (ipmi_devintf, ipmi_si)"
-        echo "  - BMC nicht konfiguriert"
+        echo "Possible causes:"
+        echo "  - System is a virtual machine"
+        echo "  - No BMC/IPMI controller present"
+        echo "  - IPMI drivers not loaded (ipmi_devintf, ipmi_si)"
+        echo "  - BMC not configured"
       } > "$OUTDIR/hardware/ipmi_info.txt"
     fi
   else
-    log_verbose "ipmitool nicht verfuegbar - IPMI-Daten werden ausgelassen."
+    log_verbose "ipmitool not available - IPMI data will be skipped."
   fi
   
   # Thermal (lm-sensors)
   if have sensors; then
     note_tool_use "lm-sensors"
-    log_verbose "Sammle Thermal-Daten..."
+    log_verbose "Collecting thermal data..."
     run_quick "$OUTDIR/hardware/sensors.txt" sensors -A
   else
-    log_verbose "lm-sensors nicht verfuegbar - Thermal-Daten werden ausgelassen."
+    log_verbose "lm-sensors not available - thermal data will be skipped."
   fi
   
   return 0
 }
 
-# Proxmox-Datensammler: VM/CT-Configs, Backup, HA, Replication, etc. (nur --full)
+# Proxmox data collector: VM/CT configs, backup, HA, replication, etc. (--full only)
 collect_pve_extended() {
   is_mode_full || return 0
   is_excluded "proxmox-extended" && return 0
   have pveversion || return 0
   
-  log_verbose "Sammle erweiterte Proxmox-Informationen..."
+  log_verbose "Collecting extended Proxmox information..."
   
   # VM-Konfigurationen
   if [[ -d /etc/pve/qemu-server ]]; then
@@ -836,7 +836,7 @@ collect_pve_extended() {
     for conf in /etc/pve/qemu-server/*.conf; do
       [[ -f "$conf" ]] && cp "$conf" "$OUTDIR/proxmox/vm-configs/" 2>/dev/null || true
     done
-    log_verbose "VM-Konfigurationen kopiert."
+    log_verbose "VM configurations copied."
   fi
   
   # CT-Konfigurationen
@@ -845,24 +845,24 @@ collect_pve_extended() {
     for conf in /etc/pve/lxc/*.conf; do
       [[ -f "$conf" ]] && cp "$conf" "$OUTDIR/proxmox/ct-configs/" 2>/dev/null || true
     done
-    log_verbose "CT-Konfigurationen kopiert."
+    log_verbose "CT configurations copied."
   fi
   
   # Backup-Konfiguration
   {
     echo "=== vzdump.conf ==="
-    cat /etc/vzdump.conf 2>/dev/null || echo "(nicht vorhanden)"
+    cat /etc/vzdump.conf 2>/dev/null || echo "(not present)"
     echo ""
     echo "=== Backup Jobs (vzdump.cron) ==="
-    cat /etc/pve/vzdump.cron 2>/dev/null || echo "(nicht vorhanden)"
+    cat /etc/pve/vzdump.cron 2>/dev/null || echo "(not present)"
     echo ""
     echo "=== Backup Jobs (jobs.cfg) ==="
-    cat /etc/pve/jobs.cfg 2>/dev/null || echo "(nicht vorhanden)"
+    cat /etc/pve/jobs.cfg 2>/dev/null || echo "(not present)"
   } >> "$OUTDIR/proxmox/backup_config.txt" 2>&1
   
-  # HA-Manager
+  # HA Manager
   if have ha-manager; then
-    log_verbose "Sammle HA-Manager Status..."
+    log_verbose "Collecting HA manager status..."
     run_quick "$OUTDIR/proxmox/ha_status.txt" ha-manager status
     
     if [[ -d /etc/pve/ha ]]; then
@@ -873,28 +873,28 @@ collect_pve_extended() {
   
   # Replication
   if have pvesr; then
-    log_verbose "Sammle Replication-Status..."
+    log_verbose "Collecting replication status..."
     run_quick "$OUTDIR/replication_status.txt" pvesr status
     [[ -f /etc/pve/replication.cfg ]] && cp /etc/pve/replication.cfg "$OUTDIR/proxmox/" 2>/dev/null || true
   fi
   
   # Subscription
-  log_verbose "Sammle Subscription-Status..."
+  log_verbose "Collecting subscription status..."
   {
     echo "=== Subscription Status ==="
-    pvesubscription get 2>/dev/null || echo "(nicht verfuegbar)"
+    pvesubscription get 2>/dev/null || echo "(not available)"
   } >> "$OUTDIR/proxmox/subscription.txt" 2>&1
   
   # SDN (Software Defined Networking)
   if [[ -d /etc/pve/sdn ]]; then
-    log_verbose "Sammle SDN-Konfiguration..."
+    log_verbose "Collecting SDN configuration..."
     mkdir -p "$OUTDIR/sdn-config"
     cp -r /etc/pve/sdn/* "$OUTDIR/proxmox/sdn-config/" 2>/dev/null || true
   fi
   
   # PBS (Proxmox Backup Server) Client Status
   if have proxmox-backup-client; then
-    log_verbose "Sammle PBS-Client Status..."
+    log_verbose "Collecting PBS client status..."
     note_tool_use "proxmox-backup-client"
     run_quick "$OUTDIR/pbs_status.txt" proxmox-backup-client version
   fi
@@ -902,19 +902,19 @@ collect_pve_extended() {
   return 0
 }
 
-# Firewall-Datensammler (nur --full)
+# Firewall data collector (--full only)
 collect_firewall() {
   is_mode_full || return 0
   is_excluded "firewall" && return 0
   
-  log_verbose "Sammle Firewall-Informationen..."
+  log_verbose "Collecting firewall information..."
   
   # PVE Firewall Status
   if have pve-firewall; then
     run_quick "$OUTDIR/security/firewall_status.txt" pve-firewall status
   fi
   
-  # Firewall-Configs kopieren
+  # Copy firewall configs
   mkdir -p "$OUTDIR/security/firewall"
   
   # Cluster Firewall
@@ -934,33 +934,33 @@ collect_firewall() {
   {
     echo "=== PVE SSL Certificate ==="
     if [[ -f /etc/pve/local/pve-ssl.pem ]]; then
-      openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -dates -subject -issuer 2>/dev/null || echo "(Fehler beim Lesen)"
+      openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -dates -subject -issuer 2>/dev/null || echo "(Error reading)"
     else
-      echo "(nicht vorhanden)"
+      echo "(not present)"
     fi
     echo ""
     echo "=== PVE Root CA ==="
     if [[ -f /etc/pve/pve-root-ca.pem ]]; then
-      openssl x509 -in /etc/pve/pve-root-ca.pem -noout -dates -subject 2>/dev/null || echo "(Fehler beim Lesen)"
+      openssl x509 -in /etc/pve/pve-root-ca.pem -noout -dates -subject 2>/dev/null || echo "(Error reading)"
     else
-      echo "(nicht vorhanden)"
+      echo "(not present)"
     fi
   } >> "$OUTDIR/security/ssl_info.txt" 2>&1
   
-  # SSH Config (ohne private Keys!)
+  # SSH config (without private keys!)
   [[ -f /etc/ssh/sshd_config ]] && cp /etc/ssh/sshd_config "$OUTDIR/security/sshd_config.txt" 2>/dev/null || true
   
   return 0
 }
 
-# Performance-Datensammler (nur --full)
+# Performance data collector (--full only)
 collect_performance() {
   is_mode_full || return 0
   is_excluded "performance" && return 0
   
-  log_verbose "Sammle Performance-Daten..."
+  log_verbose "Collecting performance data..."
   
-  # Top Prozesse
+  # Top processes
   {
     echo "=== Top 20 by Memory ==="
     ps aux --sort=-%mem 2>/dev/null | head -21
@@ -972,20 +972,20 @@ collect_performance() {
   # iostat
   if have iostat; then
     note_tool_use "sysstat (iostat)"
-    log_verbose "Sammle iostat-Daten..."
+    log_verbose "Collecting iostat data..."
     run_quick "$OUTDIR/performance/iostat.txt" iostat -xz 1 3
   fi
   
   # vmstat
   if have vmstat; then
-    log_verbose "Sammle vmstat-Daten..."
+    log_verbose "Collecting vmstat data..."
     run_quick "$OUTDIR/performance/vmstat.txt" vmstat 1 5
   fi
   
-  # sar (falls vorhanden)
+  # sar (if available)
   if have sar; then
     note_tool_use "sysstat (sar)"
-    log_verbose "Sammle sar-Daten..."
+    log_verbose "Collecting sar data..."
     run "$OUTDIR/performance/sar_cpu.txt" sar -u 1 5
     run "$OUTDIR/performance/sar_disk.txt" sar -d 1 5
   fi
@@ -993,65 +993,65 @@ collect_performance() {
   return 0
 }
 
-# System-Erweiterungen (nur --full)
+# System extensions (--full only)
 collect_system_extended() {
   is_mode_full || return 0
   is_excluded "system-extended" && return 0
   
-  log_verbose "Sammle erweiterte System-Informationen..."
+  log_verbose "Collecting extended system information..."
   
-  # Boot-Konfiguration
+  # Boot configuration
   {
     echo "=== Kernel Cmdline ==="
-    cat /proc/cmdline 2>/dev/null || echo "(nicht verfuegbar)"
+    cat /proc/cmdline 2>/dev/null || echo "(not available)"
     echo ""
     echo "=== GRUB Config ==="
-    cat /etc/default/grub 2>/dev/null || echo "(nicht vorhanden)"
+    cat /etc/default/grub 2>/dev/null || echo "(not present)"
     echo ""
     echo "=== Kernel Modules ==="
-    lsmod 2>/dev/null || echo "(nicht verfuegbar)"
+    lsmod 2>/dev/null || echo "(not available)"
   } >> "$OUTDIR/system/boot_config.txt" 2>&1
   
-  # Systemd Timer
+  # Systemd timers
   {
     echo "=== Systemd Timers ==="
-    systemctl list-timers --all --no-pager 2>/dev/null || echo "(nicht verfuegbar)"
+    systemctl list-timers --all --no-pager 2>/dev/null || echo "(not available)"
   } >> "$OUTDIR/system/systemd_timers.txt" 2>&1
   
   return 0
 }
 
-# ---------- Anonymisierung ----------
+# ---------- Anonymization ----------
 
 anonymize_output() {
   [[ "$ANONYMIZE" != "yes" ]] && return 0
   
-  log "Anonymisiere gesammelte Daten..."
-  log_verbose "Ersetze IP-Adressen, MAC-Adressen und Hostnamen..."
+  log "Anonymizing collected data..."
+  log_verbose "Replacing IP addresses, MAC addresses, and hostnames..."
   
-  # Zaehler fuer Ersetzungen
+  # Counters for replacements
   local ip_count=0
   local mac_count=0
   
-  # Alle Textdateien im Ausgabeverzeichnis finden
+  # Find all text files in output directory
   while IFS= read -r -d '' file; do
-    # Nur Textdateien verarbeiten
+    # Only process text files
     if file -b "$file" 2>/dev/null | grep -q "text"; then
-      log_verbose "Anonymisiere: $(basename "$file")"
+      log_verbose "Anonymizing: $(basename "$file")"
       
-      # IPv4-Adressen ersetzen (erstes und letztes Oktett bleiben sichtbar)
-      # Beispiel: 192.168.1.100 -> 192.X.X.100
+      # Replace IPv4 addresses (first and last octet remain visible)
+      # Example: 192.168.1.100 -> 192.X.X.100
       sed -i \
         -e 's/\b\([0-9]\{1,3\}\)\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.\([0-9]\{1,3\}\)\b/\1.X.X.\2/g' \
         "$file" 2>/dev/null || true
       
-      # MAC-Adressen ersetzen (letzte 3 Bloecke bleiben sichtbar)
-      # Beispiel: AA:BB:CC:DD:EE:FF -> XX:XX:XX:DD:EE:FF
+      # Replace MAC addresses (last 3 blocks remain visible)
+      # Example: AA:BB:CC:DD:EE:FF -> XX:XX:XX:DD:EE:FF
       sed -i \
         -e 's/\b[0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}:\([0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}:[0-9a-fA-F]\{2\}\)\b/XX:XX:XX:\1/g' \
         "$file" 2>/dev/null || true
       
-      # Hostname ersetzen (nur wenn nicht leer)
+      # Replace hostname (only if not empty)
       if [[ -n "$HOST" && "$HOST" != "unknown-host" ]]; then
         sed -i \
           -e "s/${HOST}/HOSTNAME/g" \
@@ -1060,31 +1060,31 @@ anonymize_output() {
     fi
   done < <(find "$OUTDIR" -type f -print0)
   
-  # Hinweis in _meta.txt hinzufuegen
+  # Add notice to _meta.txt
   {
     echo ""
     echo "========================================"
-    echo "  HINWEIS: Daten wurden anonymisiert"
+    echo "  NOTICE: Data has been anonymized"
     echo "========================================"
-    echo "IP-Adressen: teilweise maskiert (erstes.X.X.letztes Oktett)"
-    echo "MAC-Adressen: teilweise maskiert (XX:XX:XX:letzte:drei:bloecke)"
-    echo "Hostname: ersetzt durch HOSTNAME"
+    echo "IP addresses: partially masked (first.X.X.last octet)"
+    echo "MAC addresses: partially masked (XX:XX:XX:last:three:blocks)"
+    echo "Hostname: replaced with HOSTNAME"
   } >> "$OUTDIR/_meta.txt"
   
-  log "Anonymisierung abgeschlossen."
+  log "Anonymization complete."
   return 0
 }
 
-# ---------- Selbsttest ----------
+# ---------- Self-test ----------
 
 run_selftest() {
   echo "========================================"
-  echo "  PVE Logscript Selbsttest"
+  echo "  PVE Logscript Self-test"
   echo "========================================"
   echo ""
   echo "Version: $VERSION"
   echo ""
-  echo "System-Tools:"
+  echo "System tools:"
   
   local sys_tools=(timeout tar gzip zstd sha256sum md5sum)
   for tool in "${sys_tools[@]}"; do
@@ -1096,7 +1096,7 @@ run_selftest() {
   done
   
   echo ""
-  echo "Storage-Tools:"
+  echo "Storage tools:"
   
   local storage_tools=(smartctl nvme zpool zfs mdadm pvs vgs lvs)
   for tool in "${storage_tools[@]}"; do
@@ -1108,7 +1108,7 @@ run_selftest() {
   done
   
   echo ""
-  echo "Proxmox-Tools:"
+  echo "Proxmox tools:"
   
   local pve_tools=(pveversion pvereport pvecm pvesm qm pct ha-manager pvesr pve-firewall)
   for tool in "${pve_tools[@]}"; do
@@ -1120,7 +1120,7 @@ run_selftest() {
   done
   
   echo ""
-  echo "Hardware-Tools (fuer --full Modus):"
+  echo "Hardware tools (for --full mode):"
   
   local hw_tools=(ipmitool sensors dmidecode lspci lsusb ethtool)
   for tool in "${hw_tools[@]}"; do
@@ -1132,7 +1132,7 @@ run_selftest() {
   done
   
   echo ""
-  echo "Performance-Tools (fuer --full Modus):"
+  echo "Performance tools (for --full mode):"
   
   local perf_tools=(iostat vmstat sar)
   for tool in "${perf_tools[@]}"; do
@@ -1144,7 +1144,7 @@ run_selftest() {
   done
   
   echo ""
-  echo "Sonstiges:"
+  echo "Other:"
   
   local other_tools=(ceph corosync-quorumtool corosync-cfgtool journalctl openssl)
   for tool in "${other_tools[@]}"; do
@@ -1157,64 +1157,64 @@ run_selftest() {
   
   echo ""
   echo "========================================"
-  echo "Speicherplatz: $(df -h . 2>/dev/null | awk 'NR==2 {print $4}') verfuegbar"
+  echo "Disk space: $(df -h . 2>/dev/null | awk 'NR==2 {print $4}') available"
   echo "========================================"
 }
 
 # ---------- Setup ----------
 
-# Selbsttest-Modus (--check) - benoetigt kein root
+# Self-test mode (--check) - does not require root
 if [[ "$RUN_SELFTEST" == "yes" ]]; then
   run_selftest
   exit 0
 fi
 
-# Interaktiver TUI-Modus
+# Interactive TUI mode
 if [[ "$INTERACTIVE" == "yes" ]]; then
   run_interactive_tui
 fi
 
 require_root
 
-# Trap fuer sauberes Aufraumen bei Abbruch
+# Trap for clean cleanup on abort
 trap cleanup EXIT INT TERM
 
 umask 077
 export LC_ALL=C
 
-# Modus und Optionen ausgeben
+# Output mode and options
 log "PVE Support Log Collector v${VERSION}"
-log "Modus: $MODE"
-[[ "$VERBOSE" == "yes" ]] && log "Verbose-Modus: aktiviert"
-[[ "$ANONYMIZE" == "yes" ]] && log "Anonymisierung: aktiviert"
-[[ -n "$EXCLUDE_SECTIONS" ]] && log "Ausgeschlossene Bereiche: $EXCLUDE_SECTIONS"
+log "Mode: $MODE"
+[[ "$VERBOSE" == "yes" ]] && log "Verbose mode: enabled"
+[[ "$ANONYMIZE" == "yes" ]] && log "Anonymization: enabled"
+[[ -n "$EXCLUDE_SECTIONS" ]] && log "Excluded sections: $EXCLUDE_SECTIONS"
 
-# Tool-Check und Installation (vor der Datensammlung)
-log "Pruefe verfuegbare Tools..."
+# Tool check and installation (before data collection)
+log "Checking available tools..."
 check_all_tools
 prompt_install_tools
 
-# Ausgabeverzeichnis bestimmen
+# Determine output directory
 TARGET_DIR="${OUTPUT_DIR:-$(pwd)}"
 
-# Disk-Space pruefen
+# Check disk space
 check_disk_space "$TARGET_DIR"
 
-# Rohwerte holen
+# Get raw values
 _rawSN="$(dmidecode -s system-serial-number 2>/dev/null || echo UNKNOWN_SN)"
 _rawHOST="$(hostname -f 2>/dev/null || hostname || echo unknown-host)"
 
-# Serial Number sanitizen (keine Leerzeichen, Tabs, Slashes etc.)
+# Sanitize serial number (no spaces, tabs, slashes, etc.)
 SN="$(printf '%s' "$_rawSN" | tr -cd 'A-Za-z0-9._-')"
 [[ -z "$SN" ]] && SN="UNKNOWN"
 
-# Hostname leicht sanitizen
+# Lightly sanitize hostname
 HOST="$(printf '%s' "$_rawHOST" | tr -cd 'A-Za-z0-9._-')"
 [[ -z "$HOST" ]] && HOST="unknown-host"
 
 TS="$(date -u +'%Y%m%d-%H%M%S')"
 
-# Ausgabeverzeichnis erstellen (in TARGET_DIR)
+# Create output directory (in TARGET_DIR)
 if [[ -n "$OUTPUT_DIR" ]]; then
   [[ -d "$OUTPUT_DIR" ]] || mkdir -p "$OUTPUT_DIR"
 fi
@@ -1222,12 +1222,12 @@ OUTDIR="$(mktemp -d -p "$TARGET_DIR" "${HOST}_${SN}_${TS}.logs.XXXX")"
 TOOLS_USED_FILE="$OUTDIR/_tools_used.txt"
 ERRORS_FILE="$OUTDIR/_errors.txt"
 
-# Initialisiere Meta-Dateien
+# Initialize meta files
 touch "$TOOLS_USED_FILE" "$ERRORS_FILE"
 
-log "Arbeitsverzeichnis: $OUTDIR"
+log "Working directory: $OUTDIR"
 
-# Ordnerstruktur erstellen
+# Create directory structure
 mkdir -p "$OUTDIR/logs"
 mkdir -p "$OUTDIR/system"
 mkdir -p "$OUTDIR/network/net-if"
@@ -1237,25 +1237,25 @@ mkdir -p "$OUTDIR/hardware"
 mkdir -p "$OUTDIR/performance"
 mkdir -p "$OUTDIR/ceph"
 
-# Archivnamen (im gleichen Verzeichnis wie OUTDIR)
+# Archive names (in same directory as OUTDIR)
 ARCHIVE_ZST="${TARGET_DIR}/${HOST}_${SN}_${TS}.supportlogs.tar.zst"
 ARCHIVE_GZ="${TARGET_DIR}/${HOST}_${SN}_${TS}.supportlogs.tar.gz"
 
-# ---------- Basisinformationen ----------
-log "Sammle Basisinformationen..."
+# ---------- Base Information ----------
+log "Collecting base information..."
 
-# Meta-Informationen gesammelt schreiben
+# Write collected meta information
 {
   echo "========================================"
   echo "  PVE Support Log Collector"
   echo "========================================"
   echo ""
-  echo "Tool-Version:    $VERSION"
+  echo "Tool version:    $VERSION"
   echo "Hostname:        $HOST"
-  echo "Seriennummer:    $SN"
-  echo "Modus:           $MODE"
-  echo "Ausgefuehrt am:  $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-  [[ -n "$EXCLUDE_SECTIONS" ]] && echo "Ausgeschlossen:  $EXCLUDE_SECTIONS"
+  echo "Serial number:   $SN"
+  echo "Mode:            $MODE"
+  echo "Executed at:     $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+  [[ -n "$EXCLUDE_SECTIONS" ]] && echo "Excluded:        $EXCLUDE_SECTIONS"
   echo ""
   echo "========================================"
   echo ""
@@ -1281,7 +1281,7 @@ log "Sammle Basisinformationen..."
   free -h
 } >> "$OUTDIR/_meta.txt" 2>&1
 
-# Hardware-Informationen gesammelt
+# Collected hardware information
 {
   echo "=== CPU ==="
   lscpu 2>/dev/null || true
@@ -1309,7 +1309,7 @@ run_quick "$OUTDIR/kernel_dmesg.txt" dmesg
 } >> "$OUTDIR/system/apt_history.txt" 2>&1
 
 # ---------- Journal / Syslog ----------
-log "Sammle Journald/Syslog..."
+log "Collecting journald/syslog..."
 if have journalctl; then
   run "$OUTDIR/journal_current.txt" journalctl -b --no-pager
   run "$OUTDIR/journal_7d.txt" journalctl --since="-7 days" --no-pager
@@ -1319,8 +1319,8 @@ else
   } >> "$OUTDIR/system/syslog.txt" 2>&1
 fi
 
-# ---------- Netzwerk ----------
-log "Sammle Netzwerkdaten..."
+# ---------- Network ----------
+log "Collecting network data..."
 
 {
   echo "=== IP Addresses ==="
@@ -1337,7 +1337,7 @@ log "Sammle Netzwerkdaten..."
   fi
 } >> "$OUTDIR/network/network.txt" 2>&1
 
-# Interface-Details
+# Interface details
 for IF in /sys/class/net/*; do
   IF="$(basename "$IF")"
   {
@@ -1350,7 +1350,7 @@ for IF in /sys/class/net/*; do
   } >> "$OUTDIR/network/net-if/${IF}.txt"
 done
 
-# Netzwerk-Konfiguration
+# Network configuration
 {
   if [[ -f /etc/network/interfaces ]]; then
     echo "# /etc/network/interfaces"
@@ -1367,9 +1367,9 @@ done
 } >> "$OUTDIR/network/network_config.txt" 2>&1
 
 # ---------- Storage ----------
-# Storage-Informationen nur bei normal/full Modus
+# Storage information only in normal/full mode
 if is_mode_normal_or_full && ! is_excluded "storage"; then
-  log "Sammle Storageinformationen..."
+  log "Collecting storage information..."
 
   # MDADM
   {
@@ -1434,7 +1434,7 @@ if have pveversion && ! is_excluded "proxmox"; then
     done
   } >> "$OUTDIR/proxmox/pve_services.txt" 2>&1
 
-  # VMs und Container (nur bei normal/full)
+  # VMs and containers (only in normal/full)
   if is_mode_normal_or_full; then
     {
       if have qm; then
@@ -1485,9 +1485,9 @@ fi
 # ---------- Ceph ----------
 if have ceph && is_mode_normal_or_full && ! is_excluded "ceph"; then
   note_tool_use "Ceph"
-  log "Sammle Ceph-Informationen..."
+  log "Collecting Ceph information..."
 
-  # Timeout-Array fuer sichere Ausfuehrung
+  # Timeout array for safe execution
   TOUT=()
   have timeout && TOUT=(timeout "${CMD_TIMEOUT}s")
 
@@ -1496,19 +1496,19 @@ if have ceph && is_mode_normal_or_full && ! is_excluded "ceph"; then
   run_quick "$OUTDIR/ceph/ceph_osd.txt" ceph osd tree
   run_quick "$OUTDIR/ceph/ceph_mons.txt" ceph mon dump
 
-  # Potentiell langsame Befehle mit Timeout
-  { "${TOUT[@]}" ceph pg dump --format json >> "$OUTDIR/ceph/ceph_pg.txt" 2>&1; } || warn "ceph pg dump fehlgeschlagen oder Timeout"
-  { "${TOUT[@]}" ceph osd df >> "$OUTDIR/ceph/ceph_osd_df.txt" 2>&1; } || warn "ceph osd df fehlgeschlagen oder Timeout"
+  # Potentially slow commands with timeout
+  { "${TOUT[@]}" ceph pg dump --format json >> "$OUTDIR/ceph/ceph_pg.txt" 2>&1; } || warn "ceph pg dump failed or timeout"
+  { "${TOUT[@]}" ceph osd df >> "$OUTDIR/ceph/ceph_osd_df.txt" 2>&1; } || warn "ceph osd df failed or timeout"
 fi
 
 # ---------- SMART ----------
 if is_mode_normal_or_full && ! is_excluded "smart"; then
-  log "Sammle SMART-Daten..."
+  log "Collecting SMART data..."
   SMART_OUT="$OUTDIR/smart.txt"
 
   if have smartctl; then
     note_tool_use "smartmontools"
-    # Erweiterte Glob-Patterns fuer mehr Laufwerke (sda-sdz, sdaa-sdzz)
+    # Extended glob patterns for more drives (sda-sdz, sdaa-sdzz)
     for DEV in /dev/sd[a-z] /dev/sd[a-z][a-z] /dev/hd[a-z] /dev/xvd[a-z]; do
       [[ -b "$DEV" ]] || continue
       {
@@ -1520,8 +1520,8 @@ if is_mode_normal_or_full && ! is_excluded "smart"; then
   fi
 
   # ---------- NVMe ----------
-  log "Sammle NVMe-Daten..."
-  # Tool-Installation wurde bereits oben durchgefuehrt
+  log "Collecting NVMe data..."
+  # Tool installation was already performed above
   if have nvme; then
     note_tool_use "nvme-cli"
     run_quick "$OUTDIR/nvme_list.txt" nvme list
@@ -1541,12 +1541,12 @@ if is_mode_normal_or_full && ! is_excluded "smart"; then
       } >> "$SMART_OUT"
     done
   else
-    log_verbose "nvme-cli nicht verfuegbar - NVMe-Details werden ausgelassen."
+    log_verbose "nvme-cli not available - NVMe details will be skipped."
   fi
 fi
 
-# ---------- Systemlogs kopieren ----------
-log "Kopiere relevante Systemlogs..."
+# ---------- Copy system logs ----------
+log "Copying relevant system logs..."
 
 LOG_PATTERNS=(
   /var/log/syslog*
@@ -1565,9 +1565,9 @@ for pattern in "${LOG_PATTERNS[@]}"; do
   done
 done
 
-# ---------- Erweiterte Datensammlung (nur --full Modus) ----------
+# ---------- Extended data collection (--full mode only) ----------
 if is_mode_full; then
-  log "Sammle erweiterte Daten (--full Modus)..."
+  log "Collecting extended data (--full mode)..."
   collect_hardware_extended || true
   collect_pve_extended || true
   collect_firewall || true
@@ -1575,49 +1575,49 @@ if is_mode_full; then
   collect_system_extended || true
 fi
 
-# ---------- JSON-Metadaten ----------
+# ---------- JSON Metadata ----------
 write_json_meta || true
 
-# ---------- Anonymisierung (VOR dem Archivieren) ----------
+# ---------- Anonymization (BEFORE archiving) ----------
 anonymize_output || true
 
 # ---------- Pack ----------
-log "Packe Archiv..."
+log "Packing archive..."
 
-# Entferne leere Verzeichnisse
+# Remove empty directories
 find "$OUTDIR" -type d -empty -delete 2>/dev/null || true
 
 ARCHIVE_CREATED=""
 if have zstd; then
   note_tool_use "zstd"
   tar -C "$(dirname "$OUTDIR")" -I "zstd -19 --threads=0" -cf "$ARCHIVE_ZST" "$(basename "$OUTDIR")"
-  log "Archiv erstellt: $ARCHIVE_ZST"
+  log "Archive created: $ARCHIVE_ZST"
   ARCHIVE_CREATED="$ARCHIVE_ZST"
 else
   note_tool_use "gzip"
   tar -C "$(dirname "$OUTDIR")" -czf "$ARCHIVE_GZ" "$(basename "$OUTDIR")"
-  log "Archiv erstellt: $ARCHIVE_GZ"
+  log "Archive created: $ARCHIVE_GZ"
   ARCHIVE_CREATED="$ARCHIVE_GZ"
 fi
 
-# ---------- Checksummen ----------
+# ---------- Checksums ----------
 if [[ -n "$ARCHIVE_CREATED" && -f "$ARCHIVE_CREATED" ]]; then
   generate_checksums "$ARCHIVE_CREATED"
 fi
 
 # ---------- Cleanup ----------
-# Trap deaktivieren da wir jetzt manuell aufraeumen
+# Disable trap since we now clean up manually
 trap - EXIT INT TERM
 
 if [[ "$KEEP_WORK" == "yes" ]]; then
-  log "Arbeitsverzeichnis bleibt erhalten: $OUTDIR"
+  log "Working directory preserved: $OUTDIR"
 else
   rm -rf "$OUTDIR"
 fi
 
-log "Fertig."
+log "Done."
 log ""
-log "Ausgabedateien:"
-log "  Archiv: $ARCHIVE_CREATED"
+log "Output files:"
+log "  Archive: $ARCHIVE_CREATED"
 [[ -f "${ARCHIVE_CREATED}.sha256" ]] && log "  SHA256: ${ARCHIVE_CREATED}.sha256"
 [[ -f "${ARCHIVE_CREATED}.md5" ]] && log "  MD5:    ${ARCHIVE_CREATED}.md5"
