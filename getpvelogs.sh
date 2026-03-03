@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Version: 4.0.3 - 01/2026
+# Version: 4.0.4 - 03/2026
 # Thomas-Krenn.AG - Proxmox VE Support Log Collector
 # Author: Samuel Mueller
 # Contact: smueller@thomas-krenn.com
@@ -53,7 +53,7 @@ shopt -s nullglob
 shopt -s lastpipe
 
 # ---------- Constants ----------
-readonly VERSION="4.0.3"
+readonly VERSION="4.0.4"
 readonly MIN_DISK_SPACE_MB=500
 readonly CMD_TIMEOUT=60
 
@@ -899,10 +899,15 @@ log "Collecting basic information..."
 
 run_quick "$OUTDIR/kernel_dmesg.txt" dmesg
 
-# APT History
+# APT History (nur Textdateien; .gz mit zcat dekomprimieren)
 {
   for f in /var/log/apt/history.log*; do
-    [[ -f "$f" ]] && cat "$f" 2>/dev/null
+    [[ -f "$f" ]] || continue
+    if [[ "$f" == *.gz ]]; then
+      zcat "$f" 2>/dev/null || gzip -dc "$f" 2>/dev/null
+    else
+      cat "$f" 2>/dev/null
+    fi
   done
 } >> "$OUTDIR/system/apt_history.txt" 2>&1
 
