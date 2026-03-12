@@ -1,7 +1,3 @@
-# Release Notes — Proxmox VE Support Log Collector
-
----
-
 ## vX.Y.Z (Month Year)
 
 **Release Date:** MM/DD/YYYY

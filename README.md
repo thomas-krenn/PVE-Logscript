@@ -1,6 +1,6 @@
 # Proxmox VE Support Log Collector
 
-**Version:** 4.0.4 — 03/2026
+**Version:** 4.0.5 — 03/2026
 
 **Author:** Samuel Müller
 
@@ -139,15 +139,12 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 ## Feature Scope
 
-### Base (all modes)
+### Default Mode (in addition to base)
 
 * Progress output to STDOUT
 * Kernel dmesg and journal logs
 * Network configuration and interface details
 * PVE service status
-
-### Default Mode (in addition to base)
-
 * Storage: LVM, ZFS, MDADM
 * SMART data (SATA/SAS and NVMe)
 * Ceph information (if present)
