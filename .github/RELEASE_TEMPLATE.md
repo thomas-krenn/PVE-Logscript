@@ -1,3 +1,14 @@
+## Änderungen
+
+- **ZFS-Properties**: Sammlung aller ZFS-Properties über `zfs get all` in der ZFS-Sektion (`zfs.txt`) ergänzt.
+
+## Version
+
+- **getpvelogs.sh**: Version `4.0.5` (03/2026)
+
+## Hinweise
+
+- **Kompatibilität**: Änderung ist rein lesend und beeinflusst den Systemzustand nicht.
 # Release Notes — Proxmox VE Support Log Collector
 
 ---

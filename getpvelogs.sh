@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Version: 4.0.4 - 03/2026
+# Version: 4.0.5 - 03/2026
 # Thomas-Krenn.AG - Proxmox VE Support Log Collector
 # Author: Samuel Mueller
 # Contact: smueller@thomas-krenn.com
@@ -53,7 +53,7 @@ shopt -s nullglob
 shopt -s lastpipe
 
 # ---------- Constants ----------
-readonly VERSION="4.0.4"
+readonly VERSION="4.0.5"
 readonly MIN_DISK_SPACE_MB=500
 readonly CMD_TIMEOUT=60
 
@@ -1012,6 +1012,9 @@ if is_mode_normal_or_full && ! is_excluded "storage"; then
       if have zfs; then
         echo "=== ZFS List ==="
         zfs list -t all -o name,used,avail,refer,mountpoint 2>/dev/null || true
+        echo ""
+        echo "=== ZFS Properties (zfs get all) ==="
+        zfs get all 2>/dev/null || true
       fi
     } >> "$OUTDIR/zfs.txt" 2>&1
   fi
