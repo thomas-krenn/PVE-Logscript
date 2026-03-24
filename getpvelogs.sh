@@ -1112,38 +1112,47 @@ if have ceph && is_mode_normal_or_full && ! is_excluded "ceph"; then
     echo "OSD|DEVICE|SERIAL"
     if have ceph-volume; then
       note_tool_use "ceph-volume"
-      ceph-volume lvm list 2>/dev/null | awk '
-        /^====== osd\.[0-9]+ ======$/ {
-          gsub(/^====== osd\./, "", $0)
-          gsub(/ ======$/, "", $0)
-          osd=$0
-          next
-        }
-        /^[[:space:]]*devices[[:space:]]+/ {
-          if (osd == "") next
-          line=$0
-          sub(/^[[:space:]]*devices[[:space:]]+/, "", line)
-          gsub(/,/, " ", line)
-          n=split(line, arr, /[[:space:]]+/)
-          for (i=1; i<=n; i++) {
-            if (arr[i] ~ /^\/dev\//) print osd "|" arr[i]
-          }
-        }
-      ' | while IFS='|' read -r osd raw_dev; do
-        [[ -n "$osd" && -n "$raw_dev" ]] || continue
+      CEPH_VOLUME_RAW="$OUTDIR/ceph/ceph_volume_lvm_list.txt"
+      ceph-volume lvm list > "$CEPH_VOLUME_RAW" 2>&1 || warn "ceph-volume lvm list failed (see ceph_volume_lvm_list.txt)"
 
-        real_dev=$(readlink -f "$raw_dev" 2>/dev/null || echo "$raw_dev")
-        disk_dev=$(lsblk -ndo PATH,TYPE -s "$real_dev" 2>/dev/null | awk '$2=="disk"{d=$1} END{print d}')
-        [[ -n "$disk_dev" ]] || disk_dev="$real_dev"
+      osd=""
+      found_mapping=0
+      while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
 
-        serial=$(lsblk -ndo SERIAL "$disk_dev" 2>/dev/null | awk 'NR==1{print; exit}')
-        if [[ -z "$serial" ]] && have udevadm; then
-          serial=$(udevadm info --query=property --name "$disk_dev" 2>/dev/null | awk -F= '/^(ID_SERIAL_SHORT|ID_SERIAL)=/{print $2; exit}')
+        if [[ "$line" =~ osd\.([0-9]+) ]]; then
+          osd="${BASH_REMATCH[1]}"
+          continue
         fi
-        [[ -n "$serial" ]] || serial="unknown"
 
-        printf '%s|%s|%s\n' "$osd" "$disk_dev" "$serial"
-      done | sort -u
+        if [[ "$line" =~ ^[[:space:]]*devices[[:space:]]+(.+) ]] && [[ -n "$osd" ]]; then
+          devices_raw="${BASH_REMATCH[1]}"
+          devices_raw="${devices_raw//,/ }"
+
+          for raw_dev in $devices_raw; do
+            [[ "$raw_dev" == /dev/* ]] || continue
+
+            real_dev=$(readlink -f "$raw_dev" 2>/dev/null || true)
+            [[ -n "$real_dev" ]] || real_dev="$raw_dev"
+
+            disk_dev=$(lsblk -ndo PATH,TYPE -s "$real_dev" 2>/dev/null | awk '$2=="disk"{d=$1} END{print d}')
+            [[ -n "$disk_dev" ]] || disk_dev="$real_dev"
+
+            serial=$(lsblk -ndo SERIAL "$disk_dev" 2>/dev/null | awk 'NR==1{print; exit}')
+            if [[ -z "$serial" ]] && have udevadm; then
+              serial=$(udevadm info --query=property --name "$disk_dev" 2>/dev/null | awk -F= '/^(ID_SERIAL_SHORT|ID_SERIAL)=/{print $2; exit}')
+            fi
+            [[ -n "$serial" ]] || serial="unknown"
+
+            printf '%s|%s|%s\n' "$osd" "$disk_dev" "$serial"
+            found_mapping=1
+          done
+        fi
+      done < "$CEPH_VOLUME_RAW"
+
+      if [[ "$found_mapping" -eq 0 ]]; then
+        echo "INFO|no osd-device mapping parsed|unknown"
+      fi
     else
       echo "INFO|ceph-volume missing|serial mapping unavailable"
     fi
