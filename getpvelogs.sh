@@ -1105,6 +1105,49 @@ if have ceph && is_mode_normal_or_full && ! is_excluded "ceph"; then
   # Potentially slow commands with timeout
   { "${TOUT[@]}" ceph pg dump --format json >> "$OUTDIR/ceph/ceph_pg.txt" 2>&1; } || warn "ceph pg dump failed or timeout"
   { "${TOUT[@]}" ceph osd df >> "$OUTDIR/ceph/ceph_osd_df.txt" 2>&1; } || warn "ceph osd df failed or timeout"
+
+  # OSD -> device -> serial mapping
+  MAPPING_FILE="$OUTDIR/ceph/osd_device_mapping.txt"
+  {
+    echo "OSD|DEVICE|SERIAL"
+    if have ceph-volume; then
+      note_tool_use "ceph-volume"
+      ceph-volume lvm list 2>/dev/null | awk '
+        /^====== osd\.[0-9]+ ======$/ {
+          gsub(/^====== osd\./, "", $0)
+          gsub(/ ======$/, "", $0)
+          osd=$0
+          next
+        }
+        /^[[:space:]]*devices[[:space:]]+/ {
+          if (osd == "") next
+          line=$0
+          sub(/^[[:space:]]*devices[[:space:]]+/, "", line)
+          gsub(/,/, " ", line)
+          n=split(line, arr, /[[:space:]]+/)
+          for (i=1; i<=n; i++) {
+            if (arr[i] ~ /^\/dev\//) print osd "|" arr[i]
+          }
+        }
+      ' | while IFS='|' read -r osd raw_dev; do
+        [[ -n "$osd" && -n "$raw_dev" ]] || continue
+
+        real_dev=$(readlink -f "$raw_dev" 2>/dev/null || echo "$raw_dev")
+        disk_dev=$(lsblk -ndo PATH,TYPE -s "$real_dev" 2>/dev/null | awk '$2=="disk"{d=$1} END{print d}')
+        [[ -n "$disk_dev" ]] || disk_dev="$real_dev"
+
+        serial=$(lsblk -ndo SERIAL "$disk_dev" 2>/dev/null | awk 'NR==1{print; exit}')
+        if [[ -z "$serial" ]] && have udevadm; then
+          serial=$(udevadm info --query=property --name "$disk_dev" 2>/dev/null | awk -F= '/^(ID_SERIAL_SHORT|ID_SERIAL)=/{print $2; exit}')
+        fi
+        [[ -n "$serial" ]] || serial="unknown"
+
+        printf '%s|%s|%s\n' "$osd" "$disk_dev" "$serial"
+      done | sort -u
+    else
+      echo "INFO|ceph-volume missing|serial mapping unavailable"
+    fi
+  } > "$MAPPING_FILE"
 fi
 
 # ---------- SMART ----------
