@@ -1,6 +1,6 @@
 # Proxmox VE Support Log Collector
 
-**Version:** 4.0.5 — 03/2026
+**Version:** 4.0.6 — 03/2026
 
 **Author:** Samuel Müller
 
@@ -236,6 +236,14 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 │   └── sar_disk.txt          SAR disk data
 │
 ├── ceph/                     Ceph data (if present)
+│   ├── ceph_status.txt       Ceph cluster status
+│   ├── ceph_health.txt       Ceph health details
+│   ├── ceph_osd.txt          OSD tree
+│   ├── ceph_mons.txt         Monitor dump
+│   ├── ceph_pg.txt           Placement group data
+│   ├── ceph_osd_df.txt       OSD utilization
+│   ├── ceph_volume_lvm_list.txt Raw ceph-volume output
+│   └── osd_device_mapping.txt OSD -> device -> serial mapping
 │
 └── logs/                     System and PVE logs
 ```
