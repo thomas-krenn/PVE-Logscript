@@ -1,6 +1,6 @@
 # Proxmox VE Support Log Collector
 
-**Version:** 4.0.5 — 03/2026
+**Version:** 4.0.6 — 03/2026
 
 **Author:** Samuel Müller
 
