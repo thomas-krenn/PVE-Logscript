@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Version: 4.0.7 - 03/2026
+# Version: 4.0.7-tui - 03/2026
 # Thomas-Krenn.AG - Proxmox VE Support Log Collector
 # Author: Samuel Mueller
 # Contact: smueller@thomas-krenn.com
@@ -53,7 +53,7 @@ shopt -s nullglob
 shopt -s lastpipe
 
 # ---------- Constants ----------
-readonly VERSION="4.0.7"
+readonly VERSION="4.0.7-tui"
 readonly MIN_DISK_SPACE_MB=500
 readonly CMD_TIMEOUT=60
 
