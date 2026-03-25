@@ -1,6 +1,6 @@
-# Proxmox VE Support Log Collector with TUI
+# Proxmox VE Support Log Collector
 
-**Version:** 4.0.3-tui — 03/2026
+**Version:** 4.0.7 — 03/2026
 
 **Author:** Samuel Müller
 
@@ -14,12 +14,18 @@ This script collects diagnostically relevant system information from **Proxmox V
 
 Execution is **read-only**, except for the **optional installation of tools** such as `nvme-cli`, `ipmitool`, `lm-sensors`, and `sysstat`.
 
+## TUI Version
+
+A version of the tool with TUI (text-based user interface) is available here:  
+https://github.com/thomas-krenn/PVE-Logscript/tree/tui
+
+The TUI version allows convenient selection of information areas to collect via a menu system and provides status displays for collection progress. You need the additional package `dialog` (checked automatically during execution). Operation is fully keyboard-based. All options available in the standard script (operating mode, anonymization, target directory, etc.) are also available there.
+
 ---
 
 ## What's New in Version 4.0
 
-* **Interactive TUI:** New guided mode with `--interactive` (whiptail-based)
-* **Two operating modes:** `--normal` (default), `--full`
+* **Two operating modes:** Default (no flag), `--full`
 * **Automatic tool detection:** All required tools are checked before collection and installed if needed
 * **Anonymization:** With `--anonymize`, IPs, MACs, and hostnames are automatically replaced
 * **Extended hardware data:** IPMI/BMC sensors, thermal data (in `--full` mode)
@@ -36,7 +42,7 @@ Execution is **read-only**, except for the **optional installation of tools** su
 ### 1. Clone the repository
 
 ```bash
-git clone -b tui https://github.com/thomas-krenn/PVE-Logscript.git
+git clone https://github.com/thomas-krenn/PVE-Logscript.git
 ```
 
 ### 2. Change to the directory
@@ -62,58 +68,15 @@ sudo ./getpvelogs.sh
 If the script is only needed once:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/tui/getpvelogs.sh | sudo bash -s -- -i
+curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpvelogs.sh | sudo bash
 ```
-
----
-
-## Interactive TUI
-
-With the `--interactive` (or `-i`) parameter, the script starts a user-friendly text-based interface (TUI) that guides you through all options.
-
-### Quick Start Menu
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│ PVE Support Log Collector v4.0.3-tui                             │
-├──────────────────────────────────────────────────────────────────┤
-│ ○ Quick Start - Normal mode (recommended)                        │
-│ ○ Quick Start - Full mode                                        │
-│ ○ Custom - Go through all options                                │
-│ ○ System test - Show available tools                              │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### Custom Mode
-
-In custom mode, you are guided through the following dialogs:
-
-1. **Operating mode** - Choose between normal/full
-2. **Tool installation** - Behavior when tools are missing
-3. **Additional options** - Anonymization, JSON meta, verbose, etc.
-4. **Exclude sections** - Optionally skip Ceph, SMART, etc.
-5. **Output directory** - Optionally choose a custom path
-6. **Summary** - Confirmation before starting
-
-### Start TUI
-
-```bash
-sudo ./getpvelogs.sh --interactive
-# or short:
-sudo ./getpvelogs.sh -i
-```
-
-> **Note:** The TUI requires `whiptail`, which is preinstalled on most Debian/Ubuntu systems.
 
 ---
 
 ## Examples
 
 ```bash
-# Interactive mode with guided TUI (recommended for beginners)
-sudo ./getpvelogs.sh --interactive
-
-# Standard execution (normal mode) with interactive prompt
+# Standard execution (default) with interactive prompt
 sudo ./getpvelogs.sh
 
 # Full data collection incl. hardware and performance
@@ -139,37 +102,31 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 ## Parameters
 
-### Interactive Mode
-
-| Parameter | Description |
-|-----------|--------------|
-| `-i`, `--interactive` | Starts the interactive TUI (whiptail) with guided configuration |
-
 ### Operating Modes
 
 | Parameter | Description |
 |-----------|--------------|
-| `--normal` | Standard scope: Journal, dmesg, PVE services, network, storage, SMART, Ceph, cluster, VM/CT lists (default) |
-| `--full` | Normal + hardware (IPMI, thermal), VM/CT configs, firewall, performance, backup/HA/replication |
+| Default (no flag) | Standard scope: Journal, dmesg, PVE services, network, storage, SMART, Ceph, cluster, VM/CT lists |
+| `--full` | Full: Default + hardware (IPMI, thermal), VM/CT configs, firewall, performance, backup/HA/replication |
 
 ### Tool Installation
 
 | Parameter | Description |
 |-----------|--------------|
 | `--install-tools` | Automatically install missing tools |
-| `--no-install` | Do not install tools; missing sections are skipped |
+| `--no-install` | Do not install tools; missing sections will be skipped |
 
 ### Output Options
 
 | Parameter | Description |
 |-----------|--------------|
 | `--output-dir PATH` | Set output directory |
-| `--exclude SECTIONS` | Exclude sections (comma-separated: `ceph,smart,network,storage,proxmox`) |
+| `--exclude SECTIONS` | Exclude sections (comma-separated). Only these sections are accepted: `ceph,smart,network,storage,proxmox,proxmox-extended,hardware,firewall,performance,system-extended` |
 | `--anonymize` | Anonymize IPs, MACs, and hostnames |
 | `--json-meta` | Export metadata additionally as JSON |
 | `--verbose` | Detailed output during execution |
 
-### Other
+### Miscellaneous
 
 | Parameter | Description |
 |-----------|--------------|
@@ -180,24 +137,21 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 ---
 
-## Features
+## Feature Scope
 
-### Base (all modes)
+### Default Mode (in addition to base)
 
 * Progress output to STDOUT
 * Kernel dmesg and journal logs
 * Network configuration and interface details
 * PVE service status
-
-### Normal Mode (in addition to base)
-
 * Storage: LVM, ZFS, MDADM
 * SMART data (SATA/SAS and NVMe)
 * Ceph information (if present)
 * Cluster status (Corosync, quorum)
 * VM/CT lists
 
-### Full Mode (in addition to normal)
+### Full Mode (in addition to default)
 
 * Hardware: IPMI/BMC sensors, thermal data (lm-sensors)
 * VM/CT configuration files
@@ -225,72 +179,80 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 ├── _tools_used.txt           List of used tools
 ├── _errors.txt               Warnings and errors
 │
-├── kernel_dmesg.txt         Kernel messages
+├── kernel_dmesg.txt          Kernel messages
 ├── journal_*.txt             Journald logs
-├── smart.txt                SMART data
-├── nvme_list.txt            NVMe device list
-├── zfs.txt                  ZFS status
-├── storage.txt              Storage overview
+├── smart.txt                 SMART data
+├── nvme_list.txt             NVMe device list
+├── zfs.txt                   ZFS status
+├── storage.txt               Storage overview
 │
-├── system/                  System information
-│   ├── hw.txt               Hardware details
-│   ├── apt_history.txt      Package history
-│   ├── lvm.txt              LVM configuration
-│   ├── mdadm.txt            RAID status
-│   ├── syslog.txt           Syslog (if no journald)
-│   ├── boot_config.txt      Boot/GRUB configuration (--full)
-│   └── systemd_timers.txt   Systemd timers (--full)
+├── system/                   System information
+│   ├── hw.txt                Hardware details
+│   ├── apt_history.txt       Package history
+│   ├── lvm.txt               LVM configuration
+│   ├── mdadm.txt             RAID status
+│   ├── syslog.txt            Syslog (if no journald)
+│   ├── boot_config.txt       Boot/GRUB configuration (--full)
+│   └── systemd_timers.txt    Systemd timers (--full)
 │
-├── network/                 Network
-│   ├── network.txt          Network status
-│   ├── network_config.txt   Network configuration
-│   └── net-if/              Interface statistics
+├── network/                  Network
+│   ├── network.txt           Network status
+│   ├── network_config.txt    Network configuration
+│   └── net-if/               Interface statistics
 │
-├── proxmox/                 Proxmox VE
-│   ├── pveversion.txt       PVE version
-│   ├── pve_services.txt     PVE services
-│   ├── pve_vms.txt          VM/CT list
-│   ├── pvereport.txt        PVE report
-│   ├── cluster.txt          Cluster status
-│   ├── subscription.txt     Subscription status (--full)
-│   ├── backup_config.txt    Backup configuration (--full)
-│   ├── ha_status.txt        HA manager status (--full)
+├── proxmox/                  Proxmox VE
+│   ├── pveversion.txt        PVE version
+│   ├── pve_services.txt      PVE services
+│   ├── pve_vms.txt           VM/CT list
+│   ├── pvereport.txt         PVE report
+│   ├── cluster.txt           Cluster status
+│   ├── subscription.txt      Subscription status (--full)
+│   ├── backup_config.txt     Backup configuration (--full)
+│   ├── ha_status.txt         HA manager status (--full)
 │   ├── replication_status.txt Replication status (--full)
-│   ├── pbs_status.txt       PBS client status (--full)
-│   ├── vm-configs/          VM configurations (--full)
-│   ├── ct-configs/          CT configurations (--full)
-│   ├── ha-config/           HA configuration (--full)
-│   └── sdn-config/          SDN configuration (--full)
+│   ├── pbs_status.txt        PBS client status (--full)
+│   ├── vm-configs/           VM configurations (--full)
+│   ├── ct-configs/           CT configurations (--full)
+│   ├── ha-config/            HA configuration (--full)
+│   └── sdn-config/           SDN configuration (--full)
 │
-├── security/                Security (--full)
-│   ├── firewall_status.txt  Firewall status
-│   ├── firewall/            Firewall rules
-│   ├── ssl_info.txt         SSL certificate info
-│   └── sshd_config.txt      SSH configuration
+├── security/                 Security (--full)
+│   ├── firewall_status.txt   Firewall status
+│   ├── firewall/             Firewall rules
+│   ├── ssl_info.txt          SSL certificate info
+│   └── sshd_config.txt       SSH configuration
 │
-├── hardware/                Hardware details (--full)
-│   ├── ipmi_sensors.txt     IPMI sensor values
-│   ├── ipmi_sel.txt         IPMI system event log
-│   ├── ipmi_fru.txt         IPMI FRU data
-│   └── sensors.txt          Thermal data (lm-sensors)
+├── hardware/                 Hardware details (--full)
+│   ├── ipmi_sensors.txt      IPMI sensor values
+│   ├── ipmi_sel.txt          IPMI System Event Log
+│   ├── ipmi_fru.txt          IPMI FRU data
+│   └── sensors.txt           Thermal data (lm-sensors)
 │
-├── performance/             Performance data (--full)
-│   ├── top_processes.txt    Top processes (CPU/memory)
-│   ├── iostat.txt           I/O statistics
-│   ├── vmstat.txt           VM statistics
-│   ├── sar_cpu.txt          SAR CPU data
-│   └── sar_disk.txt         SAR disk data
+├── performance/              Performance data (--full)
+│   ├── top_processes.txt     Top processes (CPU/Memory)
+│   ├── iostat.txt            I/O statistics
+│   ├── vmstat.txt            VM statistics
+│   ├── sar_cpu.txt           SAR CPU data
+│   └── sar_disk.txt          SAR disk data
 │
-├── ceph/                    Ceph data (if present)
+├── ceph/                     Ceph data (if present)
+│   ├── ceph_status.txt       Ceph cluster status
+│   ├── ceph_health.txt       Ceph health details
+│   ├── ceph_osd.txt          OSD tree
+│   ├── ceph_mons.txt         Monitor dump
+│   ├── ceph_pg.txt           Placement group data
+│   ├── ceph_osd_df.txt       OSD utilization
+│   ├── ceph_volume_lvm_list.txt Raw ceph-volume output
+│   └── osd_device_mapping.txt OSD -> device -> serial mapping
 │
-└── logs/                    System and PVE logs
+└── logs/                     System and PVE logs
 ```
 
 ---
 
-## Data Protection / GDPR Notice
+## Privacy / GDPR Notice
 
-This script may collect the following information, among others:
+This script may collect the following information among others:
 
 * Hostnames
 * Usernames
@@ -302,9 +264,9 @@ This script may collect the following information, among others:
 
 With `--anonymize`, the following are automatically anonymized:
 
-* **IP addresses:** replaced with `X.X.X.X`
-* **MAC addresses:** replaced with `XX:XX:XX:XX:XX:XX`
-* **Hostnames:** replaced with `HOSTNAME`
+* **IP addresses:** replaced by `X.X.X.X`
+* **MAC addresses:** replaced by `XX:XX:XX:XX:XX:XX`
+* **Hostnames:** replaced by `HOSTNAME`
 
 Before sharing with third parties, it is still recommended to review the archive contents.
 
@@ -312,7 +274,7 @@ Before sharing with third parties, it is still recommended to review the archive
 
 ## Disclaimer
 
-This script serves as technical assistance.
+This script serves as a technical aid.
 **Thomas-Krenn.AG** assumes **no liability** for:
 
 * Data loss
@@ -326,7 +288,7 @@ Execution should only be performed by **qualified personnel**.
 ## Technical Details
 
 * **Minimum disk space:** 500 MB (checked before execution)
-* **Timeout:** 60 seconds for slow commands (e.g., Ceph queries)
+* **Timeout:** 60 seconds for slow commands (e.g. Ceph queries)
 * **Cleanup:** On abort (Ctrl+C), the temporary directory is automatically cleaned up
 * **Drive detection:** sda-sdz, sdaa-sdzz, NVMe namespaces
 * **Compression:** zstd (preferred) or gzip as fallback
@@ -337,10 +299,10 @@ Execution should only be performed by **qualified personnel**.
 ## Recommendations
 
 * **Before execution:**
-  The script automatically checks available disk space. Execution is aborted if less than 500 MB is available.
+  The script automatically checks available disk space. With less than 500 MB, execution is aborted.
 
 * **Self-test:**
-  With `./getpvelogs.sh --check` you can verify in advance which tools are available.
+  Use `./getpvelogs.sh --check` to verify which tools are available beforehand.
 
 * **After execution:**
   The generated archive and checksum file are located in the working directory (or the directory specified with `--output-dir`) and can be shared directly for support purposes.
