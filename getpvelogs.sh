@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Version: 4.0.6 - 03/2026
+# Version: 4.0.7 - 03/2026
 # Thomas-Krenn.AG - Proxmox VE Support Log Collector
 # Author: Samuel Mueller
 # Contact: smueller@thomas-krenn.com
@@ -53,7 +53,7 @@ shopt -s nullglob
 shopt -s lastpipe
 
 # ---------- Constants ----------
-readonly VERSION="4.0.6"
+readonly VERSION="4.0.7"
 readonly MIN_DISK_SPACE_MB=500
 readonly CMD_TIMEOUT=60
 
@@ -111,6 +111,19 @@ run_quick() {
 
 # ---------- New helper functions (v4.0) ----------
 
+readonly VALID_EXCLUDE_SECTIONS=(
+  ceph
+  smart
+  network
+  storage
+  proxmox
+  proxmox-extended
+  hardware
+  firewall
+  performance
+  system-extended
+)
+
 # Verbose logging
 log_verbose() {
   [[ "$VERBOSE" == "yes" ]] && printf '[%s] %s\n' "$(date -u +'%F %T UTC')" "$*"
@@ -119,9 +132,45 @@ log_verbose() {
 
 # Check if a section is excluded
 is_excluded() {
-  local section="$1"
-  [[ -n "$EXCLUDE_SECTIONS" && "$EXCLUDE_SECTIONS" == *"$section"* ]] && return 0
+  local section normalized
+  section="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  normalized=",$EXCLUDE_SECTIONS,"
+  [[ -n "$EXCLUDE_SECTIONS" && "$normalized" == *",$section,"* ]] && return 0
   return 1
+}
+
+# Normalize and validate comma-separated exclude sections
+normalize_exclude_sections() {
+  [[ -z "$EXCLUDE_SECTIONS" ]] && return 0
+
+  local raw item cleaned allowed valid normalized=""
+  IFS=',' read -r -a raw <<< "$EXCLUDE_SECTIONS"
+
+  for item in "${raw[@]}"; do
+    cleaned="$(printf '%s' "$item" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr '[:upper:]' '[:lower:]')"
+    [[ -z "$cleaned" ]] && continue
+
+    valid="no"
+    for allowed in "${VALID_EXCLUDE_SECTIONS[@]}"; do
+      if [[ "$cleaned" == "$allowed" ]]; then
+        valid="yes"
+        break
+      fi
+    done
+
+    if [[ "$valid" == "yes" ]]; then
+      [[ ",$normalized," == *",$cleaned,"* ]] || normalized+="${normalized:+,}$cleaned"
+    else
+      warn "Unknown section in --exclude ignored: $cleaned"
+    fi
+  done
+
+  EXCLUDE_SECTIONS="$normalized"
+}
+
+# Escape BRE regex metacharacters for safe sed search patterns
+escape_sed_bre_pattern() {
+  printf '%s' "$1" | sed -e 's/[.[\*^$()+?{}|\\]/\\&/g' -e 's/\//\\\//g'
 }
 
 # Check if mode is at least 'normal' (normal or full)
@@ -294,6 +343,7 @@ done
 
 # Initialize variable for self-test if not set
 RUN_SELFTEST="${RUN_SELFTEST:-no}"
+normalize_exclude_sections
 
 # ---------- Tool-Check-System ----------
 # Checks all required tools and prompts for installation
@@ -657,8 +707,10 @@ anonymize_output() {
       
       # Replace hostname (only if not empty)
       if [[ -n "$HOST" && "$HOST" != "unknown-host" ]]; then
+        local escaped_host
+        escaped_host="$(escape_sed_bre_pattern "$HOST")"
         sed -i \
-          -e "s/${HOST}/HOSTNAME/g" \
+          -e "s/${escaped_host}/HOSTNAME/g" \
           "$file" 2>/dev/null || true
       fi
     fi

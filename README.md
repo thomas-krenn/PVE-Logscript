@@ -1,6 +1,6 @@
 # Proxmox VE Support Log Collector
 
-**Version:** 4.0.6 — 03/2026
+**Version:** 4.0.7 — 03/2026
 
 **Author:** Samuel Müller
 
@@ -121,7 +121,7 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 | Parameter | Description |
 |-----------|--------------|
 | `--output-dir PATH` | Set output directory |
-| `--exclude SECTIONS` | Exclude sections (comma-separated: `ceph,smart,network,storage,proxmox`) |
+| `--exclude SECTIONS` | Exclude sections (comma-separated). Only these sections are accepted: `ceph,smart,network,storage,proxmox,proxmox-extended,hardware,firewall,performance,system-extended` |
 | `--anonymize` | Anonymize IPs, MACs, and hostnames |
 | `--json-meta` | Export metadata additionally as JSON |
 | `--verbose` | Detailed output during execution |
