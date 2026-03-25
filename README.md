@@ -16,10 +16,10 @@ Execution is **read-only**, except for the **optional installation of tools** su
 
 ## TUI Version
 
-A version of the tool with TUI (text-based user interface) is available here:  
+The current TUI version is available in the `tui` branch:  
 https://github.com/thomas-krenn/PVE-Logscript/tree/tui
 
-The TUI version allows convenient selection of information areas to collect via a menu system and provides status displays for collection progress. You need the additional package `dialog` (checked automatically during execution). Operation is fully keyboard-based. All options available in the standard script (operating mode, anonymization, target directory, etc.) are also available there.
+The TUI version provides guided, keyboard-based configuration via `whiptail` (`--interactive` / `-i`) and progress/status dialogs during collection. `whiptail` is checked automatically when interactive mode is started. All regular script options (mode selection, anonymization, output directory, exclude sections, etc.) remain available.
 
 ---
 
@@ -68,7 +68,7 @@ sudo ./getpvelogs.sh
 If the script is only needed once:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpvelogs.sh | sudo bash
+curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/tui/getpvelogs.sh | sudo bash
 ```
 
 ---
@@ -76,7 +76,10 @@ curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpv
 ## Examples
 
 ```bash
-# Standard execution (default) with interactive prompt
+# Interactive TUI (guided mode)
+sudo ./getpvelogs.sh --interactive
+
+# Standard execution (default)
 sudo ./getpvelogs.sh
 
 # Full data collection incl. hardware and performance
