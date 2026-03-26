@@ -76,7 +76,7 @@ curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpv
 ## Examples
 
 ```bash
-# Standard execution (default) with interactive prompt
+# Standard execution
 sudo ./getpvelogs.sh
 
 # Full data collection incl. hardware and performance
@@ -139,7 +139,7 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 ## Feature Scope
 
-### Default Mode (in addition to base)
+### Default Mode
 
 * Progress output to STDOUT
 * Kernel dmesg and journal logs
