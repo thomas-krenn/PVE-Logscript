@@ -54,7 +54,7 @@ shopt -s lastpipe
 
 # ---------- Constants ----------
 readonly VERSION="4.0.7"
-readonly MIN_DISK_SPACE_MB=500
+readonly MIN_DISK_SPACE_MB=600
 readonly CMD_TIMEOUT=60
 
 # ---------- Global variables ----------
