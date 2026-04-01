@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Version: 4.0.7 - 03/2026
+# Version: 4.1.0 - 04/2026
 # Thomas-Krenn.AG - Proxmox VE Support Log Collector
 # Author: Samuel Mueller
 # Contact: smueller@thomas-krenn.com
@@ -53,7 +53,7 @@ shopt -s nullglob
 shopt -s lastpipe
 
 # ---------- Constants ----------
-readonly VERSION="4.0.7"
+readonly VERSION="4.1.0"
 readonly MIN_DISK_SPACE_MB=600
 readonly CMD_TIMEOUT=60
 
@@ -62,7 +62,7 @@ ERRORS_FILE=""
 TOOLS_USED_FILE=""
 OUTDIR=""
 
-# ---------- New options (v4.0) ----------
+# ---------- New options (v4.1) ----------
 MODE="normal"              # normal|full
 VERBOSE="no"               # yes|no
 ANONYMIZE="no"             # yes|no
@@ -109,7 +109,7 @@ run_quick() {
   { "$@" >>"$out" 2>&1; } || warn "Error at: $* (see $(basename "$out"))"
 }
 
-# ---------- New helper functions (v4.0) ----------
+# ---------- New helper functions (v4.1) ----------
 
 readonly VALID_EXCLUDE_SECTIONS=(
   ceph
@@ -420,7 +420,7 @@ maybe_install_nvme_cli() {
   return 1
 }
 
-# ---------- New data collectors (v4.0) ----------
+# ---------- New data collectors (v4.1) ----------
 
 # Hardware data collector: IPMI and thermal (--full only)
 collect_hardware_extended() {
@@ -886,6 +886,7 @@ mkdir -p "$OUTDIR/security"
 mkdir -p "$OUTDIR/hardware"
 mkdir -p "$OUTDIR/performance"
 mkdir -p "$OUTDIR/ceph"
+mkdir -p "$OUTDIR/meta-log"
 
 # Archive names (in same directory as OUTDIR)
 ARCHIVE_ZST="${TARGET_DIR}/${HOST}_${SN}_${TS}.supportlogs.tar.zst"
@@ -968,6 +969,8 @@ log "Collecting journald/syslog..."
 if have journalctl; then
   run "$OUTDIR/journal_current.txt" journalctl -b --no-pager
   run "$OUTDIR/journal_7d.txt" journalctl --since="-7 days" --no-pager
+  run "$OUTDIR/meta-log/journal_current.json" journalctl -b --no-pager -o json
+  run "$OUTDIR/meta-log/journal_7d.json" journalctl --since="-7 days" --no-pager -o json
 else
   {
     cat /var/log/syslog* 2>/dev/null || cat /var/log/messages* 2>/dev/null || true

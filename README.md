@@ -1,6 +1,6 @@
 # Proxmox VE Support Log Collector
 
-**Version:** 4.0.7 — 03/2026
+**Version:** 4.1.0 — 04/2026
 
 **Author:** Samuel Müller
 
@@ -23,7 +23,9 @@ The TUI version allows convenient selection of information areas to collect via 
 
 ---
 
-## What's New in Version 4.0
+## What's New in Version 4.1
+
+* **Additional journald JSON export:** In addition to text output, `journalctl` is now also written in JSON format (NDJSON) to `meta-log/`.
 
 * **Two operating modes:** Default (no flag), `--full`
 * **Automatic tool detection:** All required tools are checked before collection and installed if needed
@@ -244,6 +246,10 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 │   ├── ceph_osd_df.txt       OSD utilization
 │   ├── ceph_volume_lvm_list.txt Raw ceph-volume output
 │   └── osd_device_mapping.txt OSD -> device -> serial mapping
+│
+├── meta-log/                 Additional machine-readable logs
+│   ├── journal_current.json  Journald current boot (JSON/NDJSON)
+│   └── journal_7d.json       Journald last 7 days (JSON/NDJSON)
 │
 └── logs/                     System and PVE logs
 ```
