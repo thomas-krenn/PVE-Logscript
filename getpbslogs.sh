@@ -1,40 +1,44 @@
 #!/usr/bin/env bash
 #
 # Version: 4.1.0 - 09/2026
-# Thomas-Krenn.AG - Proxmox VE Support Log Collector
+# Thomas-Krenn.AG - Proxmox Backup Server Support Log Collector
 # Author: Samuel Mueller
 # Contact: smueller@thomas-krenn.com
 #
 # Purpose:
 #   This script collects diagnostically relevant system information from
-#   Proxmox VE hosts to make error situations more reproducible, faster, and
-#   easier to analyze for support. Execution is read-only, except for the
-#   optional installation of tools such as nvme-cli, ipmitool, etc.
+#   Proxmox Backup Server hosts to make error situations more reproducible,
+#   faster, and easier to analyze for support. Execution is read-only,
+#   except for the optional installation of tools such as nvme-cli,
+#   ipmitool, etc.
+#
+#   Backup chunk data (.chunks), private keys, password hashes, and tape
+#   encryption keys are never copied.
 #
 # Feature scope:
 #   - Two operating modes: Default, --full
 #   - Progress output to STDOUT (Collect / Copy / Pack)
 #   - Collection of kernel, journal, system, storage, and network data
-#   - Aggregation of Proxmox service and VM/CT information
+#   - Aggregation of PBS services, datastores, disks, and tasks
 #   - SMART and optional NVMe-SMART data
-#   - Ceph information (if present) in its own subfolder
 #   - Hardware information (IPMI, thermal) in --full mode
-#   - VM/CT configurations, backup, HA, replication in --full mode
-#   - Firewall configuration and SSL certificates in --full mode
+#   - PBS jobs (sync, prune, verify), remotes, tape, S3 in --full mode
+#   - Firewall, certificates, and SSH configuration in --full mode
 #   - Performance data (iostat, vmstat, sar) in --full mode
 #   - Storage of used optional tools (_tools_used.txt)
 #   - Storage of warnings and notices (_errors.txt)
 #   - Checksum generation (SHA256/MD5)
 #
 # Operating modes:
-#   Default   Standard scope: Journal, dmesg, PVE services, network,
-#             storage, SMART, Ceph, cluster, VM/CT lists (no flag)
-#   --full    Full: Default + hardware (IPMI, thermal), VM/CT configs,
-#             firewall, performance, backup/HA/replication
+#   Default   Standard scope: Journal, dmesg, PBS services, network,
+#             storage, SMART, datastores, disks, recent tasks (no flag)
+#   --full    Full: Default + hardware (IPMI, thermal), PBS jobs/remotes,
+#             tape, S3, identity providers, firewall, performance
 #
 # Privacy / GDPR notice:
-#   This script can read hostnames, usernames, VM names, and IP addresses.
-#   Review of contents is recommended before sharing with third parties.
+#   This script can read hostnames, usernames, datastore names, and IP
+#   addresses. Review of contents is recommended before sharing with
+#   third parties.
 #
 # Disclaimer:
 #   This script serves as a technical aid. Thomas-Krenn.AG assumes no
@@ -54,13 +58,16 @@ shopt -s lastpipe
 readonly VERSION="4.1.0"
 readonly MIN_DISK_SPACE_MB=600
 readonly CMD_TIMEOUT=60
+readonly TASK_LOG_MAX_AGE_DAYS=7
+readonly TASK_LOG_MAX_FILES=300
+readonly TASK_LOG_MAX_BYTES=10485760  # 10 MiB per task log file
 
 # ---------- Global variables ----------
 ERRORS_FILE=""
 TOOLS_USED_FILE=""
 OUTDIR=""
 
-# ---------- New options (v4.0) ----------
+# ---------- Options ----------
 MODE="normal"              # normal|full
 VERBOSE="no"               # yes|no
 OUTPUT_DIR=""              # Custom output directory
@@ -106,28 +113,24 @@ run_quick() {
   { "$@" >>"$out" 2>&1; } || warn "Error at: $* (see $(basename "$out"))"
 }
 
-# ---------- New helper functions (v4.0) ----------
-
 readonly VALID_EXCLUDE_SECTIONS=(
-  ceph
   smart
   network
   storage
-  proxmox
-  proxmox-extended
+  pbs
+  pbs-extended
+  tape
   hardware
   firewall
   performance
   system-extended
 )
 
-# Verbose logging
 log_verbose() {
   [[ "$VERBOSE" == "yes" ]] && printf '[%s] %s\n' "$(date -u +'%F %T UTC')" "$*"
   return 0
 }
 
-# Check if a section is excluded
 is_excluded() {
   local section normalized
   section="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
@@ -136,7 +139,6 @@ is_excluded() {
   return 1
 }
 
-# Normalize and validate comma-separated exclude sections
 normalize_exclude_sections() {
   [[ -z "$EXCLUDE_SECTIONS" ]] && return 0
 
@@ -165,22 +167,14 @@ normalize_exclude_sections() {
   EXCLUDE_SECTIONS="$normalized"
 }
 
-# Check if mode is at least 'normal' (normal or full)
-is_mode_normal_or_full() {
-  [[ "$MODE" == "normal" || "$MODE" == "full" ]] && return 0
-  return 1
-}
-
-# Check if mode is 'full'
 is_mode_full() {
   [[ "$MODE" == "full" ]] && return 0
   return 1
 }
 
-# Generate checksums for the archive
 generate_checksums() {
   local archive="$1"
-  
+
   if have sha256sum; then
     sha256sum "$archive" > "${archive}.sha256"
     log "SHA256: $(cat "${archive}.sha256")"
@@ -190,19 +184,18 @@ generate_checksums() {
   fi
 }
 
-# Write JSON metadata
 write_json_meta() {
   [[ "$JSON_META" != "yes" ]] && return
-  
+
   local tools_json=""
   if [[ -f "$TOOLS_USED_FILE" && -s "$TOOLS_USED_FILE" ]]; then
-    # Format tools as JSON array
     tools_json=$(awk 'BEGIN{ORS=""} {if(NR>1)printf ","; printf "\"%s\"", $0}' "$TOOLS_USED_FILE")
   fi
-  
+
   cat > "$OUTDIR/_meta.json" <<EOF
 {
   "version": "$VERSION",
+  "product": "pbs",
   "hostname": "$HOST",
   "serial": "$SN",
   "timestamp": "$TS",
@@ -227,7 +220,6 @@ check_disk_space() {
   local available_mb
   [[ -d "$df_target" ]] || df_target="$(dirname -- "$df_target")"
   [[ -d "$df_target" ]] || df_target="."
-  # -P: POSIX format, no line wrapping on long device names (e.g. /dev/mapper/...)
   available_mb=$(df -Pm "$df_target" 2>/dev/null | awk 'NR==2 {print $4}')
   if [[ "$available_mb" =~ ^[0-9]+$ ]] && (( available_mb < MIN_DISK_SPACE_MB )); then
     warn "Less than ${MIN_DISK_SPACE_MB}MB disk space available (${available_mb}MB). Aborting."
@@ -235,7 +227,6 @@ check_disk_space() {
   fi
 }
 
-# Cleanup function for trap
 cleanup() {
   local exit_code=$?
   if [[ -n "$OUTDIR" && -d "$OUTDIR" && "$KEEP_WORK" != "yes" ]]; then
@@ -244,20 +235,26 @@ cleanup() {
   exit $exit_code
 }
 
+list_datastores() {
+  if [[ -f /etc/proxmox-backup/datastore.cfg ]]; then
+    awk '/^datastore:[[:space:]]/{print $2}' /etc/proxmox-backup/datastore.cfg
+  fi
+}
+
 # ---------- Option parsing ----------
 AUTO_INSTALL_TOOLS="ask"   # ask|yes|no
 KEEP_WORK="no"
 
 show_help() {
   cat <<EOF
-Usage: getpvelogs.sh [OPTIONS]
+Usage: getpbslogs.sh [OPTIONS]
 
-Proxmox VE Support Log Collector v${VERSION}
-Collects diagnostically relevant system information from Proxmox VE hosts.
+Proxmox Backup Server Support Log Collector v${VERSION}
+Collects diagnostically relevant system information from PBS hosts.
 
 Operating modes:
   Default             Standard scope (no flag)
-  --full              Full data collection incl. hardware
+  --full              Full data collection incl. hardware, jobs, tape
 
 Tool installation:
   --install-tools     Automatically install missing tools
@@ -266,9 +263,8 @@ Tool installation:
 Output:
   --output-dir PATH   Set output directory
   --exclude SECTIONS  Exclude sections (comma-separated).
-                      Valid: ceph,smart,network,storage,proxmox,
-                      proxmox-extended,hardware,firewall,performance,
-                      system-extended
+                      Valid: smart,network,storage,pbs,pbs-extended,
+                      tape,hardware,firewall,performance,system-extended
   --json-meta         Export metadata as JSON
   --verbose           Detailed output
 
@@ -279,25 +275,19 @@ Miscellaneous:
   -h, --help          Show this help
 
 Examples:
-  sudo ./getpvelogs.sh --full --install-tools
-  sudo ./getpvelogs.sh --output-dir /tmp
-  sudo ./getpvelogs.sh --exclude ceph,smart
+  sudo ./getpbslogs.sh --full --install-tools
+  sudo ./getpbslogs.sh --output-dir /tmp
+  sudo ./getpbslogs.sh --exclude tape,smart
 
 EOF
   exit 0
 }
 
-# Parameter parsing with while loop for arguments with values
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    # Operating modes
     --full)           MODE="full"            ;;
-    
-    # Tool installation
     --install-tools)  AUTO_INSTALL_TOOLS="yes" ;;
     --no-install)     AUTO_INSTALL_TOOLS="no"  ;;
-    
-    # Output options
     --output-dir)
       shift
       [[ $# -eq 0 ]] && { warn "--output-dir requires a path"; exit 1; }
@@ -316,15 +306,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --json-meta)      JSON_META="yes"        ;;
     --verbose)        VERBOSE="yes"          ;;
-    
-    # Miscellaneous
     --keep-work)      KEEP_WORK="yes"        ;;
     --check)
-      # Self-test will be executed later
       RUN_SELFTEST="yes"
       ;;
     -v|--version)
-      echo "getpvelogs.sh v${VERSION}"
+      echo "getpbslogs.sh v${VERSION}"
       exit 0
       ;;
     -h|--help)
@@ -339,12 +326,10 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# Initialize variable for self-test if not set
 RUN_SELFTEST="${RUN_SELFTEST:-no}"
 normalize_exclude_sections
 
-# ---------- Tool-Check-System ----------
-# Checks all required tools and prompts for installation
+# ---------- Tool check ----------
 
 check_all_tools() {
   if ! is_excluded "smart"; then
@@ -352,7 +337,6 @@ check_all_tools() {
     have nvme     || MISSING_TOOLS[nvme-cli]="NVMe SMART data"
   fi
 
-  # Tools only relevant for --full mode
   if [[ "$MODE" == "full" ]]; then
     if ! is_excluded "hardware"; then
       have ipmitool || MISSING_TOOLS[ipmitool]="IPMI/BMC sensor data"
@@ -369,7 +353,7 @@ install_missing_tools() {
     warn "No apt-get available - installation not possible."
     return 1
   fi
-  
+
   log "Updating package lists..."
   if ! apt-get update -qq; then
     warn "apt-get update failed - skipping tool installation."
@@ -389,14 +373,14 @@ install_missing_tools() {
 
 prompt_install_tools() {
   [[ ${#MISSING_TOOLS[@]} -eq 0 ]] && return 0
-  
+
   echo ""
   echo "The following optional tools are missing:"
   for pkg in "${!MISSING_TOOLS[@]}"; do
     echo "  - $pkg: ${MISSING_TOOLS[$pkg]}"
   done
   echo ""
-  
+
   case "$AUTO_INSTALL_TOOLS" in
     yes)
       install_missing_tools
@@ -418,16 +402,14 @@ prompt_install_tools() {
   esac
 }
 
-# ---------- New data collectors (v4.0) ----------
+# ---------- Collectors ----------
 
-# Hardware data collector: IPMI and thermal (--full only)
 collect_hardware_extended() {
   is_mode_full || return 0
   is_excluded "hardware" && return 0
-  
+
   log "Collecting extended hardware information..."
-  
-  # IPMI/BMC
+
   if have ipmitool; then
     note_tool_use "ipmitool"
     log "  - IPMI sensor data..."
@@ -437,8 +419,7 @@ collect_hardware_extended() {
   else
     log "  - IPMI: ipmitool not available (skipped)"
   fi
-  
-  # Thermal (lm-sensors)
+
   if have sensors; then
     note_tool_use "lm-sensors"
     log "  - Thermal data (lm-sensors)..."
@@ -448,146 +429,162 @@ collect_hardware_extended() {
   fi
 }
 
-# Proxmox data collector: VM/CT configs, backup, HA, replication, etc. (--full only)
-collect_pve_extended() {
+collect_pbs_extended() {
   is_mode_full || return 0
-  is_excluded "proxmox-extended" && return 0
-  have pveversion || return 0
-  
-  log "Collecting extended Proxmox information..."
-  
-  # VM configurations
-  if [[ -d /etc/pve/qemu-server ]]; then
-    local vm_count
-    vm_count=$(find /etc/pve/qemu-server -maxdepth 1 -name "*.conf" 2>/dev/null | wc -l)
-    if [[ "$vm_count" -gt 0 ]]; then
-      mkdir -p "$OUTDIR/proxmox/vm-configs"
-      for conf in /etc/pve/qemu-server/*.conf; do
-        [[ -f "$conf" ]] && cp "$conf" "$OUTDIR/proxmox/vm-configs/" 2>/dev/null || true
-      done
-      log "  - VM configurations: $vm_count VMs copied"
-    else
-      log "  - VM configurations: no VMs present"
-    fi
+  is_excluded "pbs-extended" && return 0
+  have proxmox-backup-manager || return 0
+
+  log "Collecting extended PBS information..."
+
+  # Safe config copies (no keys, password hashes, TFA secrets, remote credentials)
+  log "  - PBS configuration files..."
+  mkdir -p "$OUTDIR/pbs/config"
+  local cfg skip
+  if [[ -d /etc/proxmox-backup ]]; then
+    for cfg in /etc/proxmox-backup/*.cfg; do
+      [[ -f "$cfg" ]] || continue
+      skip="$(basename "$cfg")"
+      case "$skip" in
+        user.cfg|tfa.cfg|remote.cfg|domains.cfg) continue ;;
+      esac
+      cp -a "$cfg" "$OUTDIR/pbs/config/" 2>/dev/null || true
+    done
   fi
-  
-  # CT configurations
-  if [[ -d /etc/pve/lxc ]]; then
-    local ct_count
-    ct_count=$(find /etc/pve/lxc -maxdepth 1 -name "*.conf" 2>/dev/null | wc -l)
-    if [[ "$ct_count" -gt 0 ]]; then
-      mkdir -p "$OUTDIR/proxmox/ct-configs"
-      for conf in /etc/pve/lxc/*.conf; do
-        [[ -f "$conf" ]] && cp "$conf" "$OUTDIR/proxmox/ct-configs/" 2>/dev/null || true
-      done
-      log "  - CT configurations: $ct_count containers copied"
-    else
-      log "  - CT configurations: no containers present"
-    fi
-  fi
-  
-  # Backup configuration
-  log "  - Backup configuration..."
+
+  log "  - Users and ACL..."
+  run_quick "$OUTDIR/pbs/user_list.txt" proxmox-backup-manager user list
+  run_quick "$OUTDIR/pbs/acl_list.txt" proxmox-backup-manager acl list
+
+  log "  - Remotes and sync jobs..."
+  run_quick "$OUTDIR/pbs/remote_list.txt" proxmox-backup-manager remote list
+  run_quick "$OUTDIR/pbs/sync_jobs.txt" proxmox-backup-manager sync-job list
+
+  log "  - Prune and verify jobs..."
+  run_quick "$OUTDIR/pbs/prune_jobs.txt" proxmox-backup-manager prune-job list
+  run_quick "$OUTDIR/pbs/verify_jobs.txt" proxmox-backup-manager verify-job list
+
+  log "  - Garbage collection..."
+  run_quick "$OUTDIR/pbs/gc_list.txt" proxmox-backup-manager garbage-collection list
+
+  local store
+  for store in $(list_datastores); do
+    [[ -n "$store" ]] || continue
+    {
+      echo "=== Datastore: $store ==="
+      proxmox-backup-manager datastore show "$store" 2>/dev/null || echo "(show failed)"
+      echo ""
+      echo "=== Garbage collection status: $store ==="
+      proxmox-backup-manager garbage-collection status "$store" 2>/dev/null || echo "(status failed)"
+      echo ""
+    } >> "$OUTDIR/pbs/datastore_details.txt" 2>&1 || true
+  done
+
+  log "  - Traffic control..."
+  run_quick "$OUTDIR/pbs/traffic_control.txt" proxmox-backup-manager traffic-control list
+
+  log "  - Notifications..."
   {
-    echo "=== vzdump.conf ==="
-    cat /etc/vzdump.conf 2>/dev/null || echo "(not present)"
+    echo "=== Notification targets ==="
+    proxmox-backup-manager notification target list 2>/dev/null || echo "(not available)"
     echo ""
-    echo "=== Backup Jobs (vzdump.cron) ==="
-    cat /etc/pve/vzdump.cron 2>/dev/null || echo "(not present)"
+    echo "=== Matchers ==="
+    proxmox-backup-manager notification matcher list 2>/dev/null || echo "(not available)"
+  } >> "$OUTDIR/pbs/notifications.txt" 2>&1
+
+  log "  - Identity providers (LDAP/AD/OpenID)..."
+  {
+    echo "=== LDAP ==="
+    proxmox-backup-manager ldap list 2>/dev/null || echo "(not available)"
     echo ""
-    echo "=== Backup Jobs (jobs.cfg) ==="
-    cat /etc/pve/jobs.cfg 2>/dev/null || echo "(not present)"
-  } >> "$OUTDIR/proxmox/backup_config.txt" 2>&1
-  
-  # HA manager
-  if have ha-manager; then
-    log "  - HA-Manager status..."
-    run_quick "$OUTDIR/proxmox/ha_status.txt" ha-manager status
-    
-    if [[ -d /etc/pve/ha ]]; then
-      mkdir -p "$OUTDIR/proxmox/ha-config"
-      cp -r /etc/pve/ha/* "$OUTDIR/proxmox/ha-config/" 2>/dev/null || true
-    fi
-  else
-    log "  - HA-Manager: not available (skipped)"
-  fi
-  
-  # Replication
-  if have pvesr; then
-    log "  - Replication status..."
-    run_quick "$OUTDIR/proxmox/replication_status.txt" pvesr status
-    [[ -f /etc/pve/replication.cfg ]] && cp /etc/pve/replication.cfg "$OUTDIR/proxmox/" 2>/dev/null || true
-  else
-    log "  - Replication: pvesr not available (skipped)"
-  fi
-  
-  # Subscription (license key is always redacted)
+    echo "=== Active Directory ==="
+    proxmox-backup-manager ad list 2>/dev/null || echo "(not available)"
+    echo ""
+    echo "=== OpenID ==="
+    proxmox-backup-manager openid list 2>/dev/null || echo "(not available)"
+  } >> "$OUTDIR/pbs/identity_providers.txt" 2>&1
+
+  log "  - ACME / certificates..."
+  {
+    echo "=== Certificate info ==="
+    proxmox-backup-manager cert info 2>/dev/null || echo "(not available)"
+    echo ""
+    echo "=== ACME accounts ==="
+    proxmox-backup-manager acme account list 2>/dev/null || echo "(not available)"
+    echo ""
+    echo "=== ACME plugins ==="
+    proxmox-backup-manager acme plugin list 2>/dev/null || echo "(not available)"
+  } >> "$OUTDIR/pbs/acme.txt" 2>&1
+
+  log "  - S3 endpoints..."
+  run_quick "$OUTDIR/pbs/s3_endpoints.txt" proxmox-backup-manager s3 endpoint list
+
   log "  - Subscription status..."
   {
     echo "=== Subscription Status ==="
-    if have pvesubscription; then
-      pvesubscription get 2>/dev/null | sed -e 's/^\([[:space:]]*key:[[:space:]]*\).*/\1[REDACTED]/' || echo "(not available)"
-    else
-      echo "(not available)"
-    fi
-  } >> "$OUTDIR/proxmox/subscription.txt" 2>&1
-  
-  # SDN (Software Defined Networking)
-  if [[ -d /etc/pve/sdn ]]; then
-    log "  - SDN configuration..."
-    mkdir -p "$OUTDIR/proxmox/sdn-config"
-    cp -r /etc/pve/sdn/* "$OUTDIR/proxmox/sdn-config/" 2>/dev/null || true
-  else
-    log "  - SDN: not configured (skipped)"
-  fi
-  
-  # PBS (Proxmox Backup Server) Client Status
-  if have proxmox-backup-client; then
-    log "  - PBS client status..."
-    note_tool_use "proxmox-backup-client"
-    run_quick "$OUTDIR/proxmox/pbs_status.txt" proxmox-backup-client version
-  fi
+    proxmox-backup-manager subscription get 2>/dev/null | sed -e 's/^\([[:space:]]*key:[[:space:]]*\).*/\1[REDACTED]/' || echo "(not available)"
+  } >> "$OUTDIR/pbs/subscription.txt" 2>&1
 }
 
-# Firewall data collector (--full only)
+collect_tape() {
+  is_mode_full || return 0
+  is_excluded "tape" && return 0
+
+  if ! have proxmox-tape; then
+    log "Tape: proxmox-tape not available (skipped)"
+    return 0
+  fi
+
+  note_tool_use "proxmox-tape"
+  log "Collecting tape information..."
+
+  run_quick "$OUTDIR/tape/status.txt" proxmox-tape status
+  run_quick "$OUTDIR/tape/drives.txt" proxmox-tape drive list
+  run_quick "$OUTDIR/tape/drive_config.txt" proxmox-tape drive config
+  run_quick "$OUTDIR/tape/changers.txt" proxmox-tape changer list
+  run_quick "$OUTDIR/tape/changer_status.txt" proxmox-tape changer status
+  run_quick "$OUTDIR/tape/inventory.txt" proxmox-tape inventory
+  run_quick "$OUTDIR/tape/media.txt" proxmox-tape media list
+  run_quick "$OUTDIR/tape/pools.txt" proxmox-tape pool list
+  run_quick "$OUTDIR/tape/backup_jobs.txt" proxmox-tape backup-job list
+  # Key IDs only — do not dump encryption secrets
+  run_quick "$OUTDIR/tape/key_list.txt" proxmox-tape key list
+}
+
 collect_firewall() {
   is_mode_full || return 0
   is_excluded "firewall" && return 0
-  
+
   log "Collecting firewall and security information..."
-  
-  # PVE Firewall Status
-  if have pve-firewall; then
-    log "  - PVE Firewall status..."
-    run_quick "$OUTDIR/security/firewall_status.txt" pve-firewall status
-  else
-    log "  - PVE Firewall: not available (skipped)"
-  fi
-  
-  # Copy firewall configs
-  log "  - Firewall configurations..."
-  mkdir -p "$OUTDIR/security/firewall"
-  
-  # Cluster Firewall
-  [[ -f /etc/pve/firewall/cluster.fw ]] && cp /etc/pve/firewall/cluster.fw "$OUTDIR/security/firewall/" 2>/dev/null || true
-  
-  # Host Firewall
-  for fw in /etc/pve/nodes/*/host.fw; do
-    [[ -f "$fw" ]] && cp "$fw" "$OUTDIR/security/firewall/$(basename "$(dirname "$fw")")_host.fw" 2>/dev/null || true
-  done
-  
-  # VM/CT Firewall
-  for fw in /etc/pve/firewall/*.fw; do
-    [[ -f "$fw" ]] && cp "$fw" "$OUTDIR/security/firewall/" 2>/dev/null || true
-  done
-  
-  # SSL certificate info
+
+  {
+    echo "=== nftables ==="
+    if have nft; then
+      nft list ruleset 2>/dev/null || echo "(nft list failed)"
+    else
+      echo "(nft not available)"
+    fi
+    echo ""
+    echo "=== iptables ==="
+    if have iptables-save; then
+      iptables-save 2>/dev/null || echo "(iptables-save failed)"
+    else
+      echo "(iptables-save not available)"
+    fi
+    echo ""
+    echo "=== ip6tables ==="
+    if have ip6tables-save; then
+      ip6tables-save 2>/dev/null || echo "(ip6tables-save failed)"
+    else
+      echo "(ip6tables-save not available)"
+    fi
+  } >> "$OUTDIR/security/firewall.txt" 2>&1
+
   log "  - SSL certificate information..."
   {
-    echo "=== PVE SSL Certificate ==="
-    if [[ -f /etc/pve/local/pve-ssl.pem ]]; then
+    echo "=== PBS Proxy Certificate ==="
+    if [[ -f /etc/proxmox-backup/proxy.pem ]]; then
       if have openssl; then
-        openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -dates -subject -issuer 2>/dev/null || echo "(error reading)"
+        openssl x509 -in /etc/proxmox-backup/proxy.pem -noout -dates -subject -issuer 2>/dev/null || echo "(error reading)"
       else
         echo "(openssl not available)"
       fi
@@ -595,31 +592,22 @@ collect_firewall() {
       echo "(not present)"
     fi
     echo ""
-    echo "=== PVE Root CA ==="
-    if [[ -f /etc/pve/pve-root-ca.pem ]]; then
-      if have openssl; then
-        openssl x509 -in /etc/pve/pve-root-ca.pem -noout -dates -subject 2>/dev/null || echo "(error reading)"
-      else
-        echo "(openssl not available)"
-      fi
-    else
-      echo "(not present)"
+    echo "=== proxmox-backup-manager cert info ==="
+    if have proxmox-backup-manager; then
+      proxmox-backup-manager cert info 2>/dev/null || echo "(not available)"
     fi
   } >> "$OUTDIR/security/ssl_info.txt" 2>&1
-  
-  # SSH config (without private keys!)
+
   log "  - SSH configuration..."
   [[ -f /etc/ssh/sshd_config ]] && cp /etc/ssh/sshd_config "$OUTDIR/security/sshd_config.txt" 2>/dev/null || true
 }
 
-# Performance data collector (--full only)
 collect_performance() {
   is_mode_full || return 0
   is_excluded "performance" && return 0
-  
+
   log "Collecting performance data..."
-  
-  # Top processes
+
   log "  - Top processes (CPU/Memory)..."
   {
     echo "=== Top 20 by Memory ==="
@@ -628,8 +616,7 @@ collect_performance() {
     echo "=== Top 20 by CPU ==="
     ps aux --sort=-%cpu 2>/dev/null | head -21 || true
   } >> "$OUTDIR/performance/top_processes.txt" 2>&1
-  
-  # iostat
+
   if have iostat; then
     note_tool_use "sysstat (iostat)"
     log "  - I/O statistics (iostat)..."
@@ -637,16 +624,14 @@ collect_performance() {
   else
     log "  - iostat: not available (skipped)"
   fi
-  
-  # vmstat
+
   if have vmstat; then
     log "  - VM statistics (vmstat)..."
     run_quick "$OUTDIR/performance/vmstat.txt" vmstat 1 5
   else
     log "  - vmstat: not available (skipped)"
   fi
-  
-  # sar (if present)
+
   if have sar; then
     note_tool_use "sysstat (sar)"
     log "  - System Activity Reports (sar)..."
@@ -657,14 +642,12 @@ collect_performance() {
   fi
 }
 
-# System extensions (--full only)
 collect_system_extended() {
   is_mode_full || return 0
   is_excluded "system-extended" && return 0
-  
+
   log "Collecting extended system information..."
-  
-  # Boot configuration
+
   log "  - Boot configuration (Kernel, GRUB, modules)..."
   {
     echo "=== Kernel Cmdline ==="
@@ -676,8 +659,7 @@ collect_system_extended() {
     echo "=== Kernel Modules ==="
     lsmod 2>/dev/null || echo "(not available)"
   } >> "$OUTDIR/system/boot_config.txt" 2>&1
-  
-  # Systemd timers
+
   log "  - Systemd timers..."
   {
     echo "=== Systemd Timers ==="
@@ -685,86 +667,119 @@ collect_system_extended() {
   } >> "$OUTDIR/system/systemd_timers.txt" 2>&1
 }
 
+copy_pbs_task_logs() {
+  local src="/var/log/proxmox-backup"
+  local dst="$OUTDIR/logs/proxmox-backup"
+  local f base sz count=0
+
+  [[ -d "$src" ]] || return 0
+  mkdir -p "$dst"
+
+  for f in "$src"/*; do
+    [[ -e "$f" ]] || continue
+    base="$(basename "$f")"
+    [[ "$base" == "tasks" ]] && continue
+    if [[ -f "$f" ]]; then
+      cp -a "$f" "$dst/" 2>/dev/null || true
+    fi
+  done
+
+  [[ -d "$src/tasks" ]] || return 0
+  mkdir -p "$dst/tasks"
+
+  for f in "$src/tasks"/archive*; do
+    [[ -f "$f" ]] || continue
+    cp -a "$f" "$dst/tasks/" 2>/dev/null || true
+  done
+
+  while IFS= read -r -d '' f; do
+    sz=$(stat -c%s "$f" 2>/dev/null || echo 0)
+    [[ "$sz" =~ ^[0-9]+$ ]] || continue
+    (( sz > TASK_LOG_MAX_BYTES )) && continue
+    cp -a "$f" "$dst/tasks/" 2>/dev/null || true
+    count=$((count + 1))
+    (( count >= TASK_LOG_MAX_FILES )) && break
+  done < <(find "$src/tasks" -type f ! -name 'archive*' -mtime -"$TASK_LOG_MAX_AGE_DAYS" -print0 2>/dev/null)
+
+  {
+    echo "Task log copy limits:"
+    echo "  max age: ${TASK_LOG_MAX_AGE_DAYS} days"
+    echo "  max files: ${TASK_LOG_MAX_FILES}"
+    echo "  max size per file: ${TASK_LOG_MAX_BYTES} bytes"
+    echo "  copied task log files: ${count}"
+  } >> "$dst/tasks/_copy_limits.txt"
+}
+
 # ---------- Self-test ----------
 
 run_selftest() {
   echo "========================================"
-  echo "  PVE Logscript Self-Test"
+  echo "  PBS Logscript Self-Test"
   echo "========================================"
   echo ""
   echo "Version: $VERSION"
   echo ""
   echo "System tools:"
-  
-  local sys_tools=(timeout tar gzip zstd sha256sum md5sum)
-  for tool in "${sys_tools[@]}"; do
+
+  local tool
+  for tool in timeout tar gzip zstd sha256sum md5sum; do
     if have "$tool"; then
       printf "  [\033[32m✓\033[0m] %s\n" "$tool"
     else
       printf "  [\033[31m✗\033[0m] %s\n" "$tool"
     fi
   done
-  
+
   echo ""
   echo "Storage tools:"
-  
-  local storage_tools=(smartctl nvme zpool zfs mdadm pvs vgs lvs)
-  for tool in "${storage_tools[@]}"; do
+  for tool in smartctl nvme zpool zfs mdadm pvs vgs lvs; do
     if have "$tool"; then
       printf "  [\033[32m✓\033[0m] %s\n" "$tool"
     else
       printf "  [\033[31m✗\033[0m] %s\n" "$tool"
     fi
   done
-  
+
   echo ""
-  echo "Proxmox tools:"
-  
-  local pve_tools=(pveversion pvereport pvecm pvesm qm pct ha-manager pvesr pve-firewall)
-  for tool in "${pve_tools[@]}"; do
+  echo "PBS tools:"
+  for tool in proxmox-backup-manager proxmox-backup-client proxmox-backup-debug proxmox-tape; do
     if have "$tool"; then
       printf "  [\033[32m✓\033[0m] %s\n" "$tool"
     else
       printf "  [\033[31m✗\033[0m] %s\n" "$tool"
     fi
   done
-  
+
   echo ""
   echo "Hardware tools (for --full mode):"
-  
-  local hw_tools=(ipmitool sensors dmidecode lspci lsusb ethtool)
-  for tool in "${hw_tools[@]}"; do
+  for tool in ipmitool sensors dmidecode lspci lsusb ethtool; do
     if have "$tool"; then
       printf "  [\033[32m✓\033[0m] %s\n" "$tool"
     else
       printf "  [\033[31m✗\033[0m] %s\n" "$tool"
     fi
   done
-  
+
   echo ""
   echo "Performance tools (for --full mode):"
-  
-  local perf_tools=(iostat vmstat sar)
-  for tool in "${perf_tools[@]}"; do
+  for tool in iostat vmstat sar; do
     if have "$tool"; then
       printf "  [\033[32m✓\033[0m] %s\n" "$tool"
     else
       printf "  [\033[31m✗\033[0m] %s\n" "$tool"
     fi
   done
-  
+
   echo ""
   echo "Other:"
-  
-  local other_tools=(ceph corosync-quorumtool corosync-cfgtool journalctl openssl)
-  for tool in "${other_tools[@]}"; do
+  for tool in journalctl openssl nft iptables-save; do
     if have "$tool"; then
       printf "  [\033[32m✓\033[0m] %s\n" "$tool"
     else
       printf "  [\033[31m✗\033[0m] %s\n" "$tool"
     fi
   done
-  
+
   echo ""
   echo "========================================"
   echo "Disk space: $(df -Ph . 2>/dev/null | awk 'NR==2 {print $4}') available"
@@ -773,7 +788,6 @@ run_selftest() {
 
 # ---------- Setup ----------
 
-# Self-test mode (--check) - does not require root
 if [[ "$RUN_SELFTEST" == "yes" ]]; then
   run_selftest
   exit 0
@@ -781,78 +795,69 @@ fi
 
 require_root
 
-# Trap for clean cleanup on abort
 trap cleanup EXIT INT TERM
 
 umask 077
 export LC_ALL=C
 
-# Output mode and options
-log "PVE Support Log Collector v${VERSION}"
+log "PBS Support Log Collector v${VERSION}"
 log "Mode: $MODE"
 [[ "$VERBOSE" == "yes" ]] && log "Verbose mode: enabled"
 [[ -n "$EXCLUDE_SECTIONS" ]] && log "Excluded sections: $EXCLUDE_SECTIONS"
 
-# Tool check and installation (before data collection)
+if ! have proxmox-backup-manager && [[ ! -d /etc/proxmox-backup ]]; then
+  warn "This does not look like a Proxmox Backup Server host (proxmox-backup-manager missing). Collecting system data only."
+fi
+
 log "Checking available tools..."
 check_all_tools
 prompt_install_tools
 
-# Determine output directory
 TARGET_DIR="${OUTPUT_DIR:-$(pwd)}"
 
-# Create custom output directory first so disk-space check and mktemp can use it
 if [[ -n "$OUTPUT_DIR" ]]; then
   [[ -d "$OUTPUT_DIR" ]] || mkdir -p "$OUTPUT_DIR"
 fi
 
-# Check disk space (after directory exists; POSIX df avoids wrapped lines)
 check_disk_space "$TARGET_DIR"
 
-# Get raw values
 _rawSN="$(dmidecode -s system-serial-number 2>/dev/null || echo UNKNOWN_SN)"
 _rawHOST="$(hostname -f 2>/dev/null || hostname || echo unknown-host)"
 
-# Sanitize serial number (no spaces, tabs, slashes, etc.)
 SN="$(printf '%s' "$_rawSN" | tr -cd 'A-Za-z0-9._-')"
 [[ -z "$SN" ]] && SN="UNKNOWN"
 
-# Lightly sanitize hostname
 HOST="$(printf '%s' "$_rawHOST" | tr -cd 'A-Za-z0-9._-')"
 [[ -z "$HOST" ]] && HOST="unknown-host"
 
 TS="$(date -u +'%Y%m%d-%H%M%S')"
 
-OUTDIR="$(mktemp -d -p "$TARGET_DIR" "${HOST}_${SN}_${TS}.logs.XXXX")"
+OUTDIR="$(mktemp -d -p "$TARGET_DIR" "${HOST}_${SN}_${TS}.pbslogs.XXXX")"
 TOOLS_USED_FILE="$OUTDIR/_tools_used.txt"
 ERRORS_FILE="$OUTDIR/_errors.txt"
 
-# Initialize meta files
 touch "$TOOLS_USED_FILE" "$ERRORS_FILE"
 
 log "Working directory: $OUTDIR"
 
-# Create directory structure
 mkdir -p "$OUTDIR/logs"
 mkdir -p "$OUTDIR/system"
 mkdir -p "$OUTDIR/network/net-if"
-mkdir -p "$OUTDIR/proxmox"
+mkdir -p "$OUTDIR/pbs"
 mkdir -p "$OUTDIR/security"
 mkdir -p "$OUTDIR/hardware"
 mkdir -p "$OUTDIR/performance"
-mkdir -p "$OUTDIR/ceph"
+mkdir -p "$OUTDIR/tape"
 
-# Archive names (in same directory as OUTDIR)
-ARCHIVE_ZST="${TARGET_DIR}/${HOST}_${SN}_${TS}.supportlogs.tar.zst"
-ARCHIVE_GZ="${TARGET_DIR}/${HOST}_${SN}_${TS}.supportlogs.tar.gz"
+ARCHIVE_ZST="${TARGET_DIR}/${HOST}_${SN}_${TS}.pbs-supportlogs.tar.zst"
+ARCHIVE_GZ="${TARGET_DIR}/${HOST}_${SN}_${TS}.pbs-supportlogs.tar.gz"
 
 # ---------- Basic information ----------
 log "Collecting basic information..."
 
-# Write collected meta information
 {
   echo "========================================"
-  echo "  PVE Support Log Collector"
+  echo "  PBS Support Log Collector"
   echo "========================================"
   echo ""
   echo "Tool-Version:    $VERSION"
@@ -886,7 +891,6 @@ log "Collecting basic information..."
   free -h
 } >> "$OUTDIR/_meta.txt" 2>&1
 
-# Hardware information
 {
   echo "=== CPU ==="
   lscpu 2>/dev/null || true
@@ -906,7 +910,6 @@ log "Collecting basic information..."
 
 run_quick "$OUTDIR/kernel_dmesg.txt" dmesg
 
-# APT history (text files; decompress .gz)
 {
   for f in /var/log/apt/history.log*; do
     [[ -f "$f" ]] || continue
@@ -923,6 +926,7 @@ log "Collecting journald/syslog..."
 if have journalctl; then
   run "$OUTDIR/journal_current.txt" journalctl -b --no-pager
   run "$OUTDIR/journal_7d.txt" journalctl --since="-7 days" --no-pager
+  run "$OUTDIR/journal_pbs.txt" journalctl -u proxmox-backup -u proxmox-backup-proxy --since="-7 days" --no-pager
 else
   {
     cat /var/log/syslog* 2>/dev/null || cat /var/log/messages* 2>/dev/null || true
@@ -948,7 +952,6 @@ if ! is_excluded "network"; then
     fi
   } >> "$OUTDIR/network/network.txt" 2>&1
 
-  # Interface details
   for IF in /sys/class/net/*; do
     IF="$(basename "$IF")"
     {
@@ -961,7 +964,6 @@ if ! is_excluded "network"; then
     } >> "$OUTDIR/network/net-if/${IF}.txt"
   done
 
-  # Network configuration
   {
     if [[ -f /etc/network/interfaces ]]; then
       echo "# /etc/network/interfaces"
@@ -976,16 +978,19 @@ if ! is_excluded "network"; then
       fi
     done
   } >> "$OUTDIR/network/network_config.txt" 2>&1
+
+  if have proxmox-backup-manager; then
+    run_quick "$OUTDIR/network/pbs_network.txt" proxmox-backup-manager network list
+    run_quick "$OUTDIR/network/pbs_dns.txt" proxmox-backup-manager dns get
+  fi
 else
   log "Skipping network data (--exclude network)"
 fi
 
 # ---------- Storage ----------
-# Storage information only in normal/full mode
-if is_mode_normal_or_full && ! is_excluded "storage"; then
+if ! is_excluded "storage"; then
   log "Collecting storage information..."
 
-  # MDADM
   {
     echo "=== MDADM Scan ==="
     mdadm --detail --scan 2>/dev/null || true
@@ -998,7 +1003,6 @@ if is_mode_normal_or_full && ! is_excluded "storage"; then
     done
   } >> "$OUTDIR/system/mdadm.txt" 2>&1
 
-  # LVM
   {
     echo "=== Physical Volumes ==="
     pvs 2>/dev/null || true
@@ -1010,7 +1014,6 @@ if is_mode_normal_or_full && ! is_excluded "storage"; then
     lvs -a 2>/dev/null || true
   } >> "$OUTDIR/system/lvm.txt" 2>&1
 
-  # ZFS
   if have zpool; then
     note_tool_use "ZFS"
     {
@@ -1029,155 +1032,56 @@ if is_mode_normal_or_full && ! is_excluded "storage"; then
       fi
     } >> "$OUTDIR/zfs.txt" 2>&1
   fi
+
+  if have proxmox-backup-manager; then
+    {
+      echo "=== PBS Disks ==="
+      proxmox-backup-manager disk list 2>/dev/null || true
+      echo ""
+      echo "=== PBS Filesystems ==="
+      proxmox-backup-manager disk fs list 2>/dev/null || true
+      echo ""
+      echo "=== PBS ZFS Pools ==="
+      proxmox-backup-manager disk zpool list 2>/dev/null || true
+    } >> "$OUTDIR/storage.txt" 2>&1
+  fi
 fi
 
-# ---------- Proxmox ----------
-if have pveversion && ! is_excluded "proxmox"; then
-  note_tool_use "Proxmox VE"
+# ---------- PBS core ----------
+if have proxmox-backup-manager && ! is_excluded "pbs"; then
+  note_tool_use "Proxmox Backup Server"
+  log "Collecting PBS information..."
 
-  run_quick "$OUTDIR/proxmox/pveversion.txt" pveversion -v
-  have pvereport && run "$OUTDIR/proxmox/pvereport.txt" pvereport
+  run_quick "$OUTDIR/pbs/versions.txt" proxmox-backup-manager versions
+  have proxmox-backup-client && run_quick "$OUTDIR/pbs/client_version.txt" proxmox-backup-client version
+  run "$OUTDIR/pbs/report.txt" proxmox-backup-manager report
+  run_quick "$OUTDIR/pbs/node.txt" proxmox-backup-manager node show
+  run_quick "$OUTDIR/pbs/server_identity.txt" proxmox-backup-manager node server-identity
+  run_quick "$OUTDIR/pbs/datastores.txt" proxmox-backup-manager datastore list
+  run_quick "$OUTDIR/pbs/tasks.txt" proxmox-backup-manager task list --all --limit 1000
 
-  # Services
   {
     echo "=== Failed Units ==="
     systemctl --failed 2>/dev/null || true
     echo ""
-    echo "=== PVE Service Status ==="
-    for svc in pvedaemon pveproxy pve-cluster pvestatd pve-firewall; do
+    echo "=== PBS Service Status ==="
+    for svc in proxmox-backup proxmox-backup-proxy proxmox-backup-banner postfix; do
       echo "--- $svc ---"
       systemctl status --no-pager "$svc" 2>/dev/null || true
       echo ""
     done
-  } >> "$OUTDIR/proxmox/pve_services.txt" 2>&1
-
-  # VMs and containers (normal/full only)
-  if is_mode_normal_or_full; then
-    {
-      if have qm; then
-        echo "=== QEMU VMs ==="
-        qm list 2>/dev/null || true
-        echo ""
-      fi
-      if have pct; then
-        echo "=== LXC Containers ==="
-        pct list 2>/dev/null || true
-      fi
-    } >> "$OUTDIR/proxmox/pve_vms.txt" 2>&1
-
-    # Storage (respect --exclude storage even inside the Proxmox block)
-    if have pvesm && ! is_excluded "storage"; then
-      {
-        echo "=== Storage Status ==="
-        pvesm status 2>/dev/null || true
-        echo ""
-        echo "=== Local Storage Content ==="
-        pvesm list local 2>/dev/null || true
-      } >> "$OUTDIR/storage.txt" 2>&1
-    fi
-
-    # Cluster
-    {
-      if have pvecm; then
-        echo "=== Cluster Status ==="
-        pvecm status 2>/dev/null || true
-        echo ""
-        echo "=== Cluster Nodes ==="
-        pvecm nodes 2>/dev/null || true
-        echo ""
-      fi
-      if have corosync-quorumtool; then
-        echo "=== Quorum Status ==="
-        corosync-quorumtool -s 2>/dev/null || true
-        echo ""
-      fi
-      if have corosync-cfgtool; then
-        echo "=== Corosync Ring Status ==="
-        corosync-cfgtool -s 2>/dev/null || true
-      fi
-    } >> "$OUTDIR/proxmox/cluster.txt" 2>&1
-  fi
-fi
-
-# ---------- Ceph ----------
-if have ceph && is_mode_normal_or_full && ! is_excluded "ceph"; then
-  note_tool_use "Ceph"
-  log "Collecting Ceph information..."
-
-  # Timeout array for safe execution
-  TOUT=()
-  have timeout && TOUT=(timeout "${CMD_TIMEOUT}s")
-
-  run_quick "$OUTDIR/ceph/ceph_status.txt" ceph -s
-  run_quick "$OUTDIR/ceph/ceph_health.txt" ceph health detail
-  run_quick "$OUTDIR/ceph/ceph_osd.txt" ceph osd tree
-  run_quick "$OUTDIR/ceph/ceph_mons.txt" ceph mon dump
-
-  # Potentially slow commands with timeout
-  { "${TOUT[@]}" ceph pg dump --format json >> "$OUTDIR/ceph/ceph_pg.json" 2>&1; } || warn "ceph pg dump failed or timeout"
-  { "${TOUT[@]}" ceph osd df >> "$OUTDIR/ceph/ceph_osd_df.txt" 2>&1; } || warn "ceph osd df failed or timeout"
-
-  # OSD -> device -> serial mapping
-  MAPPING_FILE="$OUTDIR/ceph/osd_device_mapping.txt"
-  {
-    echo "OSD|DEVICE|SERIAL"
-    if have ceph-volume; then
-      note_tool_use "ceph-volume"
-      CEPH_VOLUME_RAW="$OUTDIR/ceph/ceph_volume_lvm_list.txt"
-      ceph-volume lvm list > "$CEPH_VOLUME_RAW" 2>&1 || warn "ceph-volume lvm list failed (see ceph_volume_lvm_list.txt)"
-
-      osd=""
-      found_mapping=0
-      while IFS= read -r line || [[ -n "$line" ]]; do
-        line="${line%$'\r'}"
-
-        if [[ "$line" =~ osd\.([0-9]+) ]]; then
-          osd="${BASH_REMATCH[1]}"
-          continue
-        fi
-
-        if [[ "$line" =~ ^[[:space:]]*devices[[:space:]]+(.+) ]] && [[ -n "$osd" ]]; then
-          devices_raw="${BASH_REMATCH[1]}"
-          devices_raw="${devices_raw//,/ }"
-
-          for raw_dev in $devices_raw; do
-            [[ "$raw_dev" == /dev/* ]] || continue
-
-            real_dev=$(readlink -f "$raw_dev" 2>/dev/null || true)
-            [[ -n "$real_dev" ]] || real_dev="$raw_dev"
-
-            disk_dev=$(lsblk -ndo PATH,TYPE -s "$real_dev" 2>/dev/null | awk '$2=="disk"{d=$1} END{print d}' || true)
-            [[ -n "$disk_dev" ]] || disk_dev="$real_dev"
-
-            serial=$(lsblk -ndo SERIAL "$disk_dev" 2>/dev/null | awk 'NR==1{print}' || true)
-            if [[ -z "$serial" ]] && have udevadm; then
-              serial=$(udevadm info --query=property --name "$disk_dev" 2>/dev/null | awk -F= '/^(ID_SERIAL_SHORT|ID_SERIAL)=/{print $2; exit}' || true)
-            fi
-            [[ -n "$serial" ]] || serial="unknown"
-
-            printf '%s|%s|%s\n' "$osd" "$disk_dev" "$serial"
-            found_mapping=1
-          done
-        fi
-      done < "$CEPH_VOLUME_RAW"
-
-      if [[ "$found_mapping" -eq 0 ]]; then
-        echo "INFO|no osd-device mapping parsed|unknown"
-      fi
-    else
-      echo "INFO|ceph-volume missing|serial mapping unavailable"
-    fi
-  } > "$MAPPING_FILE"
+  } >> "$OUTDIR/pbs/services.txt" 2>&1
+elif is_excluded "pbs"; then
+  log "Skipping PBS data (--exclude pbs)"
 fi
 
 # ---------- SMART ----------
-if is_mode_normal_or_full && ! is_excluded "smart"; then
+if ! is_excluded "smart"; then
   log "Collecting SMART data..."
   SMART_OUT="$OUTDIR/smart.txt"
 
   if have smartctl; then
     note_tool_use "smartmontools"
-    # SATA/SAS, virtio, Xen (sda-sdz, sdaa-sdzz, vda-..., xvda-...)
     for DEV in /dev/sd[a-z] /dev/sd[a-z][a-z] /dev/hd[a-z] /dev/vd[a-z] /dev/vd[a-z][a-z] /dev/xvd[a-z]; do
       [[ -b "$DEV" ]] || continue
       {
@@ -1188,16 +1092,13 @@ if is_mode_normal_or_full && ! is_excluded "smart"; then
     done
   fi
 
-  # ---------- NVMe ----------
   log "Collecting NVMe data..."
-  # Tool installation was already performed above
   if have nvme; then
     note_tool_use "nvme-cli"
     run_quick "$OUTDIR/nvme_list.txt" nvme list
 
     for NV in /dev/nvme*n*; do
       [[ -b "$NV" ]] || continue
-      # Skip partitions (e.g. nvme0n1p1)
       [[ "$NV" == *p[0-9]* ]] && continue
       {
         echo "=== NVMe SMART: $NV ==="
@@ -1216,7 +1117,7 @@ if is_mode_normal_or_full && ! is_excluded "smart"; then
   fi
 fi
 
-# ---------- Copy system logs ----------
+# ---------- Copy system / PBS logs ----------
 log "Copying relevant system logs..."
 
 LOG_PATTERNS=(
@@ -1224,10 +1125,6 @@ LOG_PATTERNS=(
   /var/log/messages*
   /var/log/kern.log*
   /var/log/daemon.log*
-  /var/log/pveproxy/*
-  /var/log/pvedaemon/*
-  /var/log/pvescheduler/*
-  /var/log/pvestatd/*
 )
 
 for pattern in "${LOG_PATTERNS[@]}"; do
@@ -1236,11 +1133,17 @@ for pattern in "${LOG_PATTERNS[@]}"; do
   done
 done
 
+if ! is_excluded "pbs"; then
+  log "Copying PBS task logs (recent, size-limited)..."
+  copy_pbs_task_logs
+fi
+
 # ---------- Extended data collection (--full mode only) ----------
 if is_mode_full; then
   log "Collecting extended data (--full mode)..."
   collect_hardware_extended
-  collect_pve_extended
+  collect_pbs_extended
+  collect_tape
   collect_firewall
   collect_performance
   collect_system_extended
@@ -1252,7 +1155,6 @@ write_json_meta
 # ---------- Pack ----------
 log "Packing archive..."
 
-# Remove empty directories
 find "$OUTDIR" -type d -empty -delete 2>/dev/null || true
 
 ARCHIVE_CREATED=""
@@ -1268,13 +1170,10 @@ else
   ARCHIVE_CREATED="$ARCHIVE_GZ"
 fi
 
-# ---------- Checksums ----------
 if [[ -n "$ARCHIVE_CREATED" && -f "$ARCHIVE_CREATED" ]]; then
   generate_checksums "$ARCHIVE_CREATED"
 fi
 
-# ---------- Cleanup ----------
-# Disable trap since we are now cleaning up manually
 trap - EXIT INT TERM
 
 if [[ "$KEEP_WORK" == "yes" ]]; then

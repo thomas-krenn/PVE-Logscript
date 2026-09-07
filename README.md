@@ -1,6 +1,6 @@
-# Proxmox VE Support Log Collector
+# Proxmox Support Log Collector
 
-**Version:** 4.0.7 — 03/2026
+**Version:** 4.1.0 — 09/2026
 
 **Author:** Samuel Müller
 
@@ -10,24 +10,37 @@
 
 ## Purpose
 
-This script collects diagnostically relevant system information from **Proxmox VE hosts** to make error situations more reproducible, faster, and easier to analyze for support purposes.
+These scripts collect diagnostically relevant system information from **Proxmox VE** and **Proxmox Backup Server** hosts to make error situations more reproducible, faster, and easier to analyze for support purposes.
+
+| Script | Target |
+|--------|--------|
+| `getpvelogs.sh` | Proxmox VE nodes |
+| `getpbslogs.sh` | Proxmox Backup Server |
 
 Execution is **read-only**, except for the **optional installation of tools** such as `nvme-cli`, `ipmitool`, `lm-sensors`, and `sysstat`.
+
+`getpbslogs.sh` never copies backup chunk data (`.chunks`), private keys, password hashes, or tape encryption secrets.
 
 ## TUI Version
 
 A version of the tool with TUI (text-based user interface) is available here:  
 https://github.com/thomas-krenn/PVE-Logscript/tree/tui
 
-The TUI version allows convenient selection of information areas to collect via a menu system and provides status displays for collection progress. You need the additional package `dialog` (checked automatically during execution). Operation is fully keyboard-based. All options available in the standard script (operating mode, anonymization, target directory, etc.) are also available there.
+The TUI version allows convenient selection of information areas to collect via a menu system and provides status displays for collection progress. You need the additional package `dialog` (checked automatically during execution). Operation is fully keyboard-based. All options available in the standard script (operating mode, target directory, etc.) are also available there.
 
 ---
+
+## What's New in Version 4.1
+
+* **PBS collector:** `getpbslogs.sh` for Proxmox Backup Server (same CLI as the PVE script)
+* **Stability:** `set -e`/`pipefail` abort paths fixed (`ps | head`, `apt-get update`, disk-space check)
+* **`--exclude`:** `network` and `storage` now actually skip the matching sections
+* **`--anonymize` removed:** the option caused incomplete/unreliable redaction and was dropped
 
 ## What's New in Version 4.0
 
 * **Two operating modes:** Default (no flag), `--full`
 * **Automatic tool detection:** All required tools are checked before collection and installed if needed
-* **Anonymization:** With `--anonymize`, IPs, MACs, and hostnames are automatically replaced
 * **Extended hardware data:** IPMI/BMC sensors, thermal data (in `--full` mode)
 * **Extended Proxmox data:** VM/CT configurations, backup jobs, HA, replication, SDN (in `--full` mode)
 * **Firewall configuration:** PVE firewall rules and SSL certificates (in `--full` mode)
@@ -54,13 +67,21 @@ cd PVE-Logscript
 ### 3. Make the script executable
 
 ```bash
-chmod +x getpvelogs.sh
+chmod +x getpvelogs.sh getpbslogs.sh
 ```
 
 ### 4. Run the script (as root)
 
+Proxmox VE:
+
 ```bash
 sudo ./getpvelogs.sh
+```
+
+Proxmox Backup Server:
+
+```bash
+sudo ./getpbslogs.sh
 ```
 
 ### Alternative: One-liner
@@ -68,7 +89,11 @@ sudo ./getpvelogs.sh
 If the script is only needed once:
 
 ```bash
+# Proxmox VE
 curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpvelogs.sh | sudo bash
+
+# Proxmox Backup Server
+curl -sL https://raw.githubusercontent.com/thomas-krenn/PVE-Logscript/main/getpbslogs.sh | sudo bash
 ```
 
 ---
@@ -82,9 +107,6 @@ sudo ./getpvelogs.sh
 # Full data collection incl. hardware and performance
 sudo ./getpvelogs.sh --full --install-tools
 
-# Anonymized output for GDPR-compliant sharing
-sudo ./getpvelogs.sh --anonymize
-
 # Output to specific directory
 sudo ./getpvelogs.sh --output-dir /tmp/logs
 
@@ -96,6 +118,12 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 # Show version
 ./getpvelogs.sh --version
+
+# PBS: standard / full / exclude tape
+sudo ./getpbslogs.sh
+sudo ./getpbslogs.sh --full --install-tools
+sudo ./getpbslogs.sh --exclude tape,smart
+./getpbslogs.sh --check
 ```
 
 ---
@@ -121,8 +149,7 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 | Parameter | Description |
 |-----------|--------------|
 | `--output-dir PATH` | Set output directory |
-| `--exclude SECTIONS` | Exclude sections (comma-separated). Only these sections are accepted: `ceph,smart,network,storage,proxmox,proxmox-extended,hardware,firewall,performance,system-extended` |
-| `--anonymize` | Anonymize IPs, MACs, and hostnames |
+| `--exclude SECTIONS` | Exclude sections (comma-separated). PVE: `ceph,smart,network,storage,proxmox,proxmox-extended,hardware,firewall,performance,system-extended`. PBS: `smart,network,storage,pbs,pbs-extended,tape,hardware,firewall,performance,system-extended` |
 | `--json-meta` | Export metadata additionally as JSON |
 | `--verbose` | Detailed output during execution |
 
@@ -137,7 +164,7 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 
 ---
 
-## Feature Scope
+## Feature Scope (Proxmox VE)
 
 ### Default Mode
 
@@ -159,7 +186,7 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 * HA manager status and configuration
 * Replication status
 * SDN configuration
-* Subscription status
+* Subscription status (license key is always redacted)
 * Firewall rules (cluster, host, VM)
 * SSL certificate information
 * SSH configuration
@@ -240,12 +267,93 @@ sudo ./getpvelogs.sh --exclude ceph,smart
 │   ├── ceph_health.txt       Ceph health details
 │   ├── ceph_osd.txt          OSD tree
 │   ├── ceph_mons.txt         Monitor dump
-│   ├── ceph_pg.txt           Placement group data
+│   ├── ceph_pg.json          Placement group data (JSON)
 │   ├── ceph_osd_df.txt       OSD utilization
 │   ├── ceph_volume_lvm_list.txt Raw ceph-volume output
 │   └── osd_device_mapping.txt OSD -> device -> serial mapping
 │
 └── logs/                     System and PVE logs
+```
+
+---
+
+## Feature Scope (Proxmox Backup Server)
+
+Both scripts share the same CLI flags (`--full`, `--install-tools`, `--output-dir`, `--exclude`, `--json-meta`, `--verbose`, `--keep-work`, `--check`).
+
+### Default Mode
+
+* Kernel dmesg and journal logs (including PBS service journals)
+* Network configuration and PBS network/DNS view
+* Storage: LVM, ZFS, MDADM, PBS disk/filesystem/zpool list
+* SMART data (SATA/SAS and NVMe)
+* PBS version, `proxmox-backup-manager report`, node info
+* Datastore list and recent tasks
+* PBS service status (`proxmox-backup`, `proxmox-backup-proxy`)
+* Recent PBS task logs (last 7 days, size-limited; not the full task archive)
+
+### Full Mode (in addition to default)
+
+* Hardware: IPMI/BMC sensors, thermal data (lm-sensors)
+* Safe PBS config copies from `/etc/proxmox-backup/*.cfg` (no `user.cfg`, `tfa.cfg`, `remote.cfg`, `domains.cfg`, no `*.key`)
+* Users/ACL via CLI (no password hashes)
+* Remotes, sync/prune/verify jobs, garbage collection status
+* Traffic control, notifications, LDAP/AD/OpenID lists
+* ACME/certificate info, S3 endpoint list (no secrets)
+* Subscription status (license key is always redacted)
+* Tape: drives, changers, inventory, media, pools, backup jobs, key IDs only
+* Firewall (`nft`/`iptables`), SSL certificate metadata, SSH configuration
+* Performance snapshots: iostat, vmstat, sar
+* Boot configuration (GRUB, kernel cmdline) and systemd timers
+
+### Never collected
+
+* Datastore chunk data (`.chunks`)
+* Private TLS keys
+* User password hashes and TFA secrets
+* Remote/LDAP bind credentials
+* Tape encryption key material (`proxmox-tape key show` is not run)
+
+## Output Structure (PBS)
+
+```text
+<hostname>_<serial>_<timestamp>.pbslogs-XXXX/
+│
+├── _meta.txt                 Metadata and system overview
+├── _meta.json                JSON metadata (with --json-meta)
+├── _tools_used.txt           List of used tools
+├── _errors.txt               Warnings and errors
+│
+├── kernel_dmesg.txt          Kernel messages
+├── journal_*.txt             Journald logs (incl. journal_pbs.txt)
+├── smart.txt                 SMART data
+├── nvme_list.txt             NVMe device list
+├── zfs.txt                   ZFS status
+├── storage.txt               PBS disk / filesystem / zpool overview
+│
+├── system/                   System information
+├── network/                  Network (incl. PBS network/DNS)
+│
+├── pbs/                      Proxmox Backup Server
+│   ├── versions.txt          PBS versions
+│   ├── report.txt            proxmox-backup-manager report
+│   ├── node.txt              Node configuration
+│   ├── datastores.txt        Datastore list
+│   ├── tasks.txt             Task list
+│   ├── services.txt          PBS service status
+│   ├── config/               Safe *.cfg copies (--full)
+│   ├── datastore_details.txt Per-datastore show + GC (--full)
+│   ├── subscription.txt      Subscription status (--full)
+│   └── ...                   jobs, remotes, ACME, S3 (--full)
+│
+├── tape/                     Tape subsystem (--full)
+├── security/                 Firewall, SSL, SSH (--full)
+├── hardware/                 IPMI / sensors (--full)
+├── performance/              Performance snapshots (--full)
+│
+└── logs/
+    ├── syslog / kern / daemon
+    └── proxmox-backup/       PBS logs and recent task files
 ```
 
 ---
@@ -256,25 +364,18 @@ This script may collect the following information among others:
 
 * Hostnames
 * Usernames
-* VM and CT names
+* VM and CT names (PVE)
+* Datastore, remote, and job names (PBS)
 * IP addresses
 * MAC addresses
 
-### Anonymization
-
-With `--anonymize`, the following are automatically anonymized:
-
-* **IP addresses:** replaced by `X.X.X.X`
-* **MAC addresses:** replaced by `XX:XX:XX:XX:XX:XX`
-* **Hostnames:** replaced by `HOSTNAME`
-
-Before sharing with third parties, it is still recommended to review the archive contents.
+Before sharing with third parties, it is recommended to review the archive contents.
 
 ---
 
 ## Disclaimer
 
-This script serves as a technical aid.
+These scripts serve as a technical aid.
 **Thomas-Krenn.AG** assumes **no liability** for:
 
 * Data loss
@@ -287,10 +388,10 @@ Execution should only be performed by **qualified personnel**.
 
 ## Technical Details
 
-* **Minimum disk space:** 500 MB (checked before execution)
-* **Timeout:** 60 seconds for slow commands (e.g. Ceph queries)
+* **Minimum disk space:** 600 MB (checked before execution; busy hosts with large journals may need more)
+* **Timeout:** 60 seconds for slow commands (e.g. Ceph queries, `proxmox-backup-manager report`)
 * **Cleanup:** On abort (Ctrl+C), the temporary directory is automatically cleaned up
-* **Drive detection:** sda-sdz, sdaa-sdzz, NVMe namespaces
+* **Drive detection:** sda-sdz, sdaa-sdzz, virtio (`vd*`), Xen (`xvd*`), NVMe namespaces, MD arrays (`/dev/md0` and `/dev/md/*`)
 * **Compression:** zstd (preferred) or gzip as fallback
 * **Checksums:** SHA256 (preferred) or MD5 as fallback
 
@@ -299,10 +400,10 @@ Execution should only be performed by **qualified personnel**.
 ## Recommendations
 
 * **Before execution:**
-  The script automatically checks available disk space. With less than 500 MB, execution is aborted.
+  The script automatically checks available disk space. With less than 600 MB, execution is aborted. Hosts with very large journals or many ZFS datasets may need additional free space.
 
 * **Self-test:**
-  Use `./getpvelogs.sh --check` to verify which tools are available beforehand.
+  Use `./getpvelogs.sh --check` or `./getpbslogs.sh --check` to verify which tools are available beforehand.
 
 * **After execution:**
-  The generated archive and checksum file are located in the working directory (or the directory specified with `--output-dir`) and can be shared directly for support purposes.
+  The generated archive and checksum file are located in the working directory (or the directory specified with `--output-dir`) and can be shared directly for support purposes. PBS archives are named `*.pbs-supportlogs.tar.zst` (or `.tar.gz`).
