@@ -139,7 +139,7 @@ type(scope): short description
 
 ## 📄 License
 
-By contributing, you agree that your contributions will be licensed under the project's existing license (LGPL-2.1).
+By contributing, you agree that your contributions will be licensed under the project's existing license (CC0 1.0 Universal).
 
 
 ## 🙌 Thank You
